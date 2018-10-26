@@ -1,3 +1,6 @@
+import sys
+import traceback
+
 def printCurrentTrace(printout = True, quitAfter = False):
 	"""Prints out the stack trace for the current place in the program.
 	Modified Code from codeasone on https://stackoverflow.com/questions/1032813/dump-stacktraces-of-all-active-threads

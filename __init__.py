@@ -1,2 +1,3 @@
-from . import debugging
 from . import common
+from . import wxPython
+from . import debugging
