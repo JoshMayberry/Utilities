@@ -229,6 +229,31 @@ class Ensure():
 		return ensure_container(*args, **kwargs)
 
 #Etc
+def setDocstring(docstring):
+	"""Sets the docstring of a function.
+	Special thanks to estani for how to change a docstring on https://stackoverflow.com/questions/4056983/how-do-i-programmatically-set-the-docstring/13603271#13603271
+	
+	docstring (str) - What the docstring for this function should be
+		- If function: Will copy the docstring belonging to that function
+
+	Example Use: 
+		@setDocstring("New Docstring")
+		def test(): pass
+	_________________________________________
+
+	Example Use: 
+		@setDocstring(myFunction)
+		def test(): pass
+	"""
+
+	if (callable(docstring)):
+		docstring = docstring.__doc__
+
+	def decorator(function):
+		function.__doc__ = docstring
+		return function
+	return decorator
+
 def nestedUpdate(target, catalogue):
 	"""Updates a nested dictionary.
 	Modified code from Alex Martelli on https://stackoverflow.com/questions/3232943/update-value-of-a-nested-dictionary-of-varying-depth/3233356#3233356

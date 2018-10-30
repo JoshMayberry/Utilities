@@ -17,15 +17,17 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 	__author__ = Legal.AutocompleteTextCtrl.__author__
 	__url__ = Legal.AutocompleteTextCtrl.__url__
 
-	def __init__(self, parent, height = 300, completer = None, caseSensitive = False, useWildcards = False, multiline = False, frequency = 250, style = None, **kwargs):
+	def __init__(self, parent, height = 300, completer = None, caseSensitive = False, useWildcards = False, 
+		alwaysShow = False, multiline = False, frequency = 250, style = None, **kwargs):
 
-		self.choices = []
+		self.choices = ()
 		self.template = None
 		self.parent = parent
 		self.height = height
 		self.skip_event = False
 		self.queued_popup = False
 		self.frequency = frequency
+		self.alwaysShow = alwaysShow
 		self.useWildcards = useWildcards
 		self.caseSensitive = caseSensitive
 
@@ -50,6 +52,9 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 		
 		choices = choices or ()
 		template = template or "<b><u>{}</b></u>"
+
+		if (choices):
+			self.choices = choices
 
 		def completer(query):
 			if (not query):
@@ -107,7 +112,11 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 
 			###########################################
 				
-			formated, unformated = zip(*yieldValues(query)) 
+			answer = tuple(zip(*yieldValues(query)))
+			if (not answer):
+				return (), ()
+
+			formated, unformated = answer
 			return formated, unformated
 
 		return completer
@@ -137,6 +146,7 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 		self.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown)
 		self.popup._suggestions.Bind(wx.EVT_LEFT_DOWN, self.OnSuggestionClicked)
 		self.popup._suggestions.Bind(wx.EVT_KEY_DOWN, self.OnSuggestionKeyDown)
+		self.Bind(wx.EVT_SET_FOCUS, self.OnSetFocus)
 		self.Bind(wx.EVT_KILL_FOCUS, self.OnKillFocus)
 
 	def AdjustPopupPosition(self):
@@ -149,7 +159,7 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 	def OnTextUpdate(self, event):
 		if self.skip_event:
 			self.skip_event = False
-		elif not self.queued_popup:
+		elif (not self.queued_popup):
 			wx.CallLater(self.frequency, self.AutoComplete)
 			self.queued_popup = True
 		event.Skip()
@@ -158,25 +168,31 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 		self.choices = choices or []
 
 	def AutoComplete(self, choices = None):
+		def apply(formated, unformated = None):
+			nonlocal self
+
+			self.popup.SetSuggestions(formated, unformated)
+
+			self.AdjustPopupPosition()
+			self.popup.ShowWithoutActivating()
+			self.SetFocus()
+
+		####################################
+
 		self.queued_popup = False
 
 		if (choices):
 			self.UpdateChoices(choices)
 
-		if self.Value != "":
+		if (self.Value != ""):
 			formated, unformated = self.completer(self.Value)
-			if len(formated) > 0:
-				self.popup.SetSuggestions(formated, unformated)
-				self.AdjustPopupPosition()
-				# self.Unbind(wx.EVT_KILL_FOCUS)
+			if (formated):
+				return apply(formated, unformated)
 
-				self.popup.ShowWithoutActivating()
-				self.SetFocus()
-				# self.Bind(wx.EVT_KILL_FOCUS, self.OnKillFocus)
-			else:
-				self.popup.Hide()
-		else:
-			self.popup.Hide()
+		if (self.alwaysShow):
+			return apply(self.choices)
+
+		self.popup.Hide()
 
 	def OnSizeChange(self, event):
 		self.popup.Size = (self.Size[0], self.height)
@@ -225,15 +241,20 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 
 	def OnSuggestionKeyDown(self, event):
 		key = event.GetKeyCode()
-		if key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
+		if (key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER)):
 			self.skip_event = True
 			self.SetValue(self.popup.GetSelectedSuggestion())
 			self.SetInsertionPointEnd()
 			self.popup.Hide()
 		event.Skip()
 
+	def OnSetFocus(self, event):
+		if (self.alwaysShow and (not self.popup.IsActive())):
+			self.AutoComplete()
+		event.Skip()
+
 	def OnKillFocus(self, event):
-		if not self.popup.IsActive():
+		if (not self.popup.IsActive()):
 			self.popup.Hide()
 		event.Skip()
 
@@ -260,9 +281,9 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 			items = None
 
 			def OnGetItem(self, n):
-				return self.items[n]
+				return self.items[n] or ""
 
-		def SetSuggestions(self, suggestions, unformated_suggestions):
+		def SetSuggestions(self, suggestions, unformated_suggestions = None):
 			self._suggestions.items = suggestions
 			self._suggestions.SetItemCount(len(suggestions))
 			self._suggestions.SetSelection(0)
@@ -270,7 +291,7 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 			self._suggestions.Refresh()
 			self.SendSizeEvent()
 
-			self._unformated_suggestions = unformated_suggestions
+			self._unformated_suggestions = unformated_suggestions or suggestions
 
 		def CursorUp(self):
 			selection = self._suggestions.GetSelection()
