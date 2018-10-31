@@ -10,6 +10,8 @@ if (__name__ == "__main__"):
 else:
 	from . import LICENSE_forSections as Legal
 
+NULL = object()
+
 class AutocompleteTextCtrl(wx.TextCtrl):
 	"""Modified code from: https://bitbucket.org/raz/wxautocompletectrl/src/default/autocomplete.py"""
 
@@ -19,15 +21,23 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 
 	def __init__(self, parent, height = 300, completer = None, frequency = 250, style = None, 
 		caseSensitive = False, useWildcards = False, alwaysShow = False, multiline = False, 
-		onSelect_hide = False, onSelect_update = False, onKey_update = False, **kwargs):
+		onSelect_hide = False, onSelect_update = False, onKey_update = False, 
+		formatter = None, verifier = None, showEmpty = False, **kwargs):
+
+		self.parent = parent
+		self.height = height
+		self.frequency = frequency
 
 		self.choices = ()
 		self.template = None
-		self.parent = parent
-		self.height = height
-		self.skip_event = False
 		self.queued_popup = False
-		self.frequency = frequency
+		self.previousValue = None
+		self.skipEvent_update = False
+
+		self.verifier = verifier
+		self.formatter = formatter
+
+		self.showEmpty = showEmpty
 		self.alwaysShow = alwaysShow
 		self.useWildcards = useWildcards
 		self.caseSensitive = caseSensitive
@@ -154,6 +164,30 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 		self.Bind(wx.EVT_CONTEXT_MENU, self.OnRightClick)
 		self.Bind(wx.EVT_KILL_FOCUS, self.OnKillFocus)
 
+	def SetValue(self, value = NULL, default = None):
+		# print("@SetValue", self.formatter)
+
+		if (value is NULL):
+			value = self.Value
+
+		if (self.verifier):
+			if (not self.verifier(value)):
+				if (default is not None):
+					return super().SetValue(default)
+				return
+
+		if (self.formatter):
+			value = self.formatter(value)
+			if (value is None):
+				if (default is not None):
+					return super().SetValue(default)
+				return
+
+		if (self.previousValue is None):
+			self.previousValue = value
+
+		return super().SetValue(value)
+
 	def AdjustPopupPosition(self):
 		self.popup.Position = self.ClientToScreen((0, self.Size.height)).Get()
 
@@ -165,8 +199,8 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 		if (self.IsFrozen()):
 			pass
 
-		elif (self.skip_event):
-			self.skip_event = False
+		elif (self.skipEvent_update):
+			self.skipEvent_update = False
 
 		elif (not self.queued_popup):
 			wx.CallLater(self.frequency, self.AutoComplete)
@@ -195,10 +229,11 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 		if (choices):
 			self.UpdateChoices(choices)
 
-		if (self.Value != ""):
-			formated, unformated = self.completer(self.Value)
-			# if (formated):
-			return apply(formated, unformated)
+		value = self.GetValue()
+		if (value != ""):
+			formated, unformated = self.completer(value)
+			if (self.showEmpty or formated):
+				return apply(formated, unformated)
 
 		elif (self.alwaysShow):
 			return apply(self.choices)
@@ -222,7 +257,7 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 			return
 
 		elif (key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and self.popup.Shown):
-			self.skip_event = True
+			self.skipEvent_update = True
 			self.SetValue(self.popup.GetSelectedSuggestion())
 			self.SetInsertionPointEnd()
 			self.popup.Hide()
@@ -234,7 +269,7 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 		elif (key == wx.WXK_END):
 			self.popup.CursorEnd()
 
-		elif (event.ControlDown() and unichr(key).lower() == "a"):
+		elif (event.ControlDown() and chr(key).lower() == "a"):
 			self.SelectAll()
 
 		elif (key == wx.WXK_ESCAPE):
@@ -244,8 +279,9 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 		event.Skip()
 
 	def OnSuggestionClicked(self, event):
-		self.skip_event = True
-		self.Value = self.popup.GetSuggestion(self.popup._suggestions.VirtualHitTest(event.Position[1]))
+		print("@OnSuggestionClicked")
+		self.skipEvent_update = True
+		self.SetValue(self.popup.GetSuggestion(self.popup._suggestions.VirtualHitTest(event.Position[1])))
 		self.SetInsertionPointEnd()
 		
 		wx.CallAfter(self.SetFocus)
@@ -259,7 +295,7 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 	def OnSuggestionKeyDown(self, event):
 		key = event.GetKeyCode()
 		if (key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER)):
-			self.skip_event = True
+			self.skipEvent_update = True
 			self.SetValue(self.popup.GetSelectedSuggestion())
 			self.SetInsertionPointEnd()
 			self.popup.Hide()
@@ -276,8 +312,14 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 		event.Skip()
 
 	def OnKillFocus(self, event):
-		if (not self.popup.IsShown()):
+		if (self.FindFocus() not in (self.popup._suggestions, self)):
 			self.popup.Hide()
+
+			if (self.verifier or self.formatter):
+				self.skipEvent_update = True
+				self.SetValue(default = self.previousValue)
+				self.previousValue = self.Value
+
 		event.Skip()
 
 	class SuggestionsPopup(wx.Frame):
@@ -287,7 +329,7 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 
 		def __init__(self, parent, frame):
 			# wx.Frame.__init__(self, frame, style = wx.FRAME_NO_TASKBAR|wx.FRAME_FLOAT_ON_PARENT|wx.STAY_ON_TOP)
-			wx.Frame.__init__(self, frame, style = wx.FRAME_FLOAT_ON_PARENT|wx.STAY_ON_TOP|wx.RESIZE_BORDER)
+			wx.Frame.__init__(self, frame, style = wx.FRAME_NO_TASKBAR|wx.FRAME_FLOAT_ON_PARENT|wx.STAY_ON_TOP|wx.RESIZE_BORDER)
 
 			self.parent = parent
 			panel = wx.Panel(self, wx.ID_ANY)
@@ -299,6 +341,8 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 
 			sizer.Add(self._suggestions, 1, wx.ALL|wx.EXPAND, 5)
 			panel.SetSizer(sizer)
+
+			self.Bind(wx.EVT_KILL_FOCUS, self.OnKillFocus)
 
 		class _listbox(wx.html.HtmlListBox):
 			items = None
@@ -324,7 +368,7 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 
 			thing = self.parent
 			if (thing.onKey_update):
-				thing.skip_event = True
+				thing.skipEvent_update = True
 				thing.SetValue(self.GetSelectedSuggestion())
 
 		def CursorDown(self):
@@ -335,7 +379,7 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 
 			thing = self.parent
 			if (thing.onKey_update):
-				thing.skip_event = True
+				thing.skipEvent_update = True
 				thing.SetValue(self.GetSelectedSuggestion())
 
 		def CursorHome(self):
@@ -351,3 +395,8 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 
 		def GetSuggestion(self, n):
 			return self._unformated_suggestions[n]
+
+		def OnKillFocus(self, event):
+			if (self.FindFocus() not in (self._suggestions, self.parent)):
+				self.Hide()
+			event.Skip()

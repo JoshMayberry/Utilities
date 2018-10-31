@@ -215,6 +215,31 @@ def ensure_container(item, evaluateGenerator = True, convertNone = True, element
 		return item
 	return item
 
+def ensure_dict(catalogue, default = None):
+	"""Makes sure the given catalogue is a dictionary.
+
+	Example Input: ensure_dict(relation, attribute)
+	"""
+
+	if (isinstance(catalogue, dict)):
+		return catalogue
+	return {catalogue: default}
+
+def ensure_default(value, default = None, *, defaultFlag = None):
+	"""Returns 'default' if 'value' is 'defaultFlag'.
+	otherwise returns 'value'.
+
+	Example Input: ensureDefault(autoPrint, False)
+	Example Input: ensureDefault(autoPrint, lambda: self.checkPermission("autoPrint"))
+	Example Input: ensureDefault(autoPrint, defaultFlag = NULL)
+	"""
+
+	if (value is defaultFlag):
+		if (callable(default)):
+			return default()
+		return default
+	return value
+
 class Ensure():
 	@classmethod
 	def ensure_set(cls, *args, **kwargs):
@@ -227,6 +252,15 @@ class Ensure():
 	@classmethod
 	def ensure_container(cls, *args, **kwargs):
 		return ensure_container(*args, **kwargs)
+
+	@classmethod
+	def ensure_dict(cls, *args, **kwargs):
+		return ensure_dict(*args, **kwargs)
+
+
+	@classmethod
+	def ensure_default(cls, *args, **kwargs):
+		return ensure_default(*args, **kwargs)
 
 #Etc
 def setDocstring(docstring):
@@ -254,16 +288,22 @@ def setDocstring(docstring):
 		return function
 	return decorator
 
-def nestedUpdate(target, catalogue):
+def nestedUpdate(target, catalogue, *, preserveNone = True):
 	"""Updates a nested dictionary.
 	Modified code from Alex Martelli on https://stackoverflow.com/questions/3232943/update-value-of-a-nested-dictionary-of-varying-depth/3233356#3233356
 	
 	Example Input: nestedUpdate(self.contents, self.contents_override)
 	"""
 
+	if (target is None):
+		if (preserveNone):
+			errorMessage = "Catalogue mismatch"
+			raise KeyError(errorMessage)
+		target = {}
+
 	for key, value in catalogue.items():
 		if (isinstance(value, dict)):
-			target[key] = nestedUpdate(target.get(key, {}), value)
+			target[key] = nestedUpdate(target.get(key, {}), value, preserveNone = preserveNone)
 		else:
 			if ((key in target) and (isinstance(target[key], dict))):
 				target[key]["value"] = value
@@ -425,18 +465,20 @@ class CommonFunctions():
 	def nestedUpdate(cls, *args, **kwargs):
 		return nestedUpdate(*args, **kwargs)
 		
+	# @classmethod
+	# def setDocstring(cls, *args, **kwargs):
+	# 	return setDocstring(*args, **kwargs)
 
 	@classmethod
 	def _StringToValue(cls, *args, **kwargs):
 		return _StringToValue(*args, **kwargs)
-		
 
 	@classmethod
 	def _SetValueUsingMunger(cls, *args, **kwargs):
 		return _SetValueUsingMunger(*args, **kwargs)
 
-
 	@classmethod
 	def _Munge(cls, *args, **kwargs):
 		return _Munge(*args, **kwargs)
+
 	
