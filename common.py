@@ -2,6 +2,8 @@ import os
 import sys
 import typing
 
+NULL = object()
+
 #Iterators
 class CustomIterator():
 	"""Iterates over items in an external list."""
@@ -263,31 +265,6 @@ class Ensure():
 		return ensure_default(*args, **kwargs)
 
 #Etc
-def setDocstring(docstring):
-	"""Sets the docstring of a function.
-	Special thanks to estani for how to change a docstring on https://stackoverflow.com/questions/4056983/how-do-i-programmatically-set-the-docstring/13603271#13603271
-	
-	docstring (str) - What the docstring for this function should be
-		- If function: Will copy the docstring belonging to that function
-
-	Example Use: 
-		@setDocstring("New Docstring")
-		def test(): pass
-	_________________________________________
-
-	Example Use: 
-		@setDocstring(myFunction)
-		def test(): pass
-	"""
-
-	if (callable(docstring)):
-		docstring = docstring.__doc__
-
-	def decorator(function):
-		function.__doc__ = docstring
-		return function
-	return decorator
-
 def nestedUpdate(target, catalogue, *, preserveNone = True):
 	"""Updates a nested dictionary.
 	Modified code from Alex Martelli on https://stackoverflow.com/questions/3232943/update-value-of-a-nested-dictionary-of-varying-depth/3233356#3233356
@@ -480,5 +457,95 @@ class CommonFunctions():
 	@classmethod
 	def _Munge(cls, *args, **kwargs):
 		return _Munge(*args, **kwargs)
-
 	
+#Decorators
+def setDocstring(docstring):
+	"""Sets the docstring of a function.
+	Special thanks to estani for how to change a docstring on https://stackoverflow.com/questions/4056983/how-do-i-programmatically-set-the-docstring/13603271#13603271
+	
+	docstring (str) - What the docstring for this function should be
+		- If function: Will copy the docstring belonging to that function
+
+	Example Use: 
+		@setDocstring("New Docstring")
+		def test(): pass
+	_________________________________________
+
+	Example Use: 
+		@setDocstring(myFunction)
+		def test(): pass
+	"""
+
+	if (callable(docstring)):
+		docstring = docstring.__doc__
+
+	def decorator(function):
+		function.__doc__ = docstring
+		return function
+	return decorator
+
+def lazyProperty(variable = None, default = NULL, defaultVariable = None):
+	"""Crates a property using the decorated function as the getter.
+	The docstring of the decorated function becomes the docstring for the property.
+
+	variable (str) - The name of the variable in 'self' to use for the property
+		- If None: uses the name of 'function' prefixed by an underscore
+
+	default (any) - What value to initialize 'variable' in 'self' as if it does not yet exist
+		- If NULL: Checks for a kwarg in 'function' that matches 'defaultVariable'
+
+	defaultVariable (str) - The name of a kwarg in 'function' to use for 'default'
+		- If None: Uses "default"
+		Note: this must be a kwarg, not an arg with a default; this means it must appear after *
+	___________________________________________________________
+
+	Example Use:
+		class Test():
+			@lazyProperty()
+			def x(self, value, *, default = 0):
+				'''Lorem ipsum'''
+				return f"The value is {value}"
+
+		test = Test()
+		print(test.x)
+		test.x = 1
+		print(test.x)
+
+	Equivalent Use:
+		@lazyProperty(defaultVariable = "someKwarg")
+		def x(self, value, *, someKwarg = 0):
+
+	Equivalent Use:
+		@lazyProperty(default = 0)
+		def x(self, value):
+	___________________________________________________________
+	"""
+	def decorator(function):
+		_variable = variable or f"_{function.__name__}"
+
+		if (default is not NULL):
+			_default = default
+		elif (function.__kwdefaults__ is not None):
+			_default = function.__kwdefaults__.get(defaultVariable or "default")
+		else:
+			_default = None
+
+		def getter(self):
+			nonlocal getter_runOnce, getter, setter, _default #Both functions must have the same number of 'free variables' to replace __code__
+			return getattr(self, _variable)
+
+		def getter_runOnce(self):
+			if (not hasattr(self, _variable)):
+				setter(self, _default)
+
+			getter_runOnce.__code__ = getter.__code__
+			return getattr(self, _variable)
+
+		def setter(self, value):
+			setattr(self, _variable, function(self, value))
+
+		def remover(self):
+			delattr(self, _variable)
+
+		return property(fget = getter_runOnce, fset = setter, fdel = remover, doc = function.__doc__)
+	return decorator
