@@ -1,6 +1,8 @@
 import os
 import sys
 import typing
+import inspect
+import collections
 
 NULL = object()
 
@@ -437,6 +439,26 @@ def _Munge(munger, source = None, extraArgs = [], returnMunger_onFail = False):
 	else:
 		return None
 
+def getClass(function):
+	"""Returns the class that the given function belongs to.
+	Modified code from Yoel on: https://stackoverflow.com/questions/3589311/get-defining-class-of-unbound-method-object-in-python-3/25959545#25959545
+
+	Example Input: getClass(myFunction)
+	"""
+
+	if (inspect.ismethod(function)):
+		for cls in inspect.getmro(function.__self__.__class__):
+			if (cls.__dict__.get(function.__name__) is function):
+				return cls
+		function = function.__func__
+	
+	if (inspect.isfunction(function)):
+		cls = getattr(inspect.getmodule(function), function.__qualname__.split('.<locals>', 1)[0].rsplit('.', 1)[0])
+		if (isinstance(cls, type)):
+			return cls
+
+	return getattr(function, '__objclass__', None)
+
 class CommonFunctions():
 	@classmethod
 	def nestedUpdate(cls, *args, **kwargs):
@@ -484,7 +506,8 @@ def setDocstring(docstring):
 		return function
 	return decorator
 
-def lazyProperty(variable = None, default = NULL, defaultVariable = None):
+def lazyProperty(variable = None, default = NULL, defaultVariable = None, 
+	catalogueVariable_all = "_lazyProperties_all", catalogueVariable_used = "_lazyProperties_used"):
 	"""Crates a property using the decorated function as the getter.
 	The docstring of the decorated function becomes the docstring for the property.
 
@@ -497,6 +520,12 @@ def lazyProperty(variable = None, default = NULL, defaultVariable = None):
 	defaultVariable (str) - The name of a kwarg in 'function' to use for 'default'
 		- If None: Uses "default"
 		Note: this must be a kwarg, not an arg with a default; this means it must appear after *
+
+	catalogueVariable_all (str) - The name of a variable for a set to add each lazy property name to 
+		- If None: Will not catalogue variable names
+
+	catalogueVariable_used (str) - The name of a variable for a set to add each created lazy property name to 
+		- If None: Will not catalogue variable names
 	___________________________________________________________
 
 	Example Use:
@@ -520,7 +549,16 @@ def lazyProperty(variable = None, default = NULL, defaultVariable = None):
 		def x(self, value):
 	___________________________________________________________
 	"""
+
 	def decorator(function):
+		import sys
+
+		if (catalogueVariable_all is not None):
+			module = inspect.getmodule(function)
+			if (not hasattr(module, catalogueVariable_all)):
+				setattr(module, catalogueVariable_all, collections.defaultdict(set))
+			getattr(module, catalogueVariable_all)[function.__qualname__.split('.<locals>', 1)[0].rsplit('.', 1)[0]].add(function.__name__)
+
 		_variable = variable or f"_{function.__name__}"
 
 		if (default is not NULL):
@@ -531,12 +569,18 @@ def lazyProperty(variable = None, default = NULL, defaultVariable = None):
 			_default = None
 
 		def getter(self):
-			nonlocal getter_runOnce, getter, setter, _default #Both functions must have the same number of 'free variables' to replace __code__
+			nonlocal getter_runOnce, getter, setter, _default, catalogueVariable_used #Both functions must have the same number of 'free variables' to replace __code__
 			return getattr(self, _variable)
 
 		def getter_runOnce(self):
 			if (not hasattr(self, _variable)):
 				setter(self, _default)
+
+			if (catalogueVariable_used is not None):
+				if (not hasattr(self, catalogueVariable_used)):
+					setattr(self, catalogueVariable_used, {_variable})
+				else:
+					getattr(self, catalogueVariable_used).add(_variable)
 
 			getter_runOnce.__code__ = getter.__code__
 			return getattr(self, _variable)
