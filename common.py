@@ -6,6 +6,9 @@ import collections
 
 NULL = object()
 
+class ELEMENT():
+	"""Used to make a class pass ensure_container() as an element instead of a container."""
+
 #Iterators
 class CustomIterator():
 	"""Iterates over items in an external list."""
@@ -194,10 +197,12 @@ def ensure_list(item, convertNone = False):
 	if (convertNone):
 		return []
 
-def ensure_container(item, evaluateGenerator = True, convertNone = True, elementTypes = None):
+def ensure_container(item, evaluateGenerator = True, convertNone = True, elementTypes = None, returnForNone = None):
 	"""Makes sure the given item is a container.
 
 	elementTypes (list) - Extra types that are ok to be elements
+	returnForNone (any) - What should be returned if 'item' is None
+		- If function: will return whatever the function returns
 
 	Example Input: ensure_container(valueList)
 	Example Input: ensure_container(valueList, convertNone = False)
@@ -208,9 +213,11 @@ def ensure_container(item, evaluateGenerator = True, convertNone = True, element
 	if (item is None):
 		if (convertNone):
 			return ()
-		return (None,)
+		if (callable(returnForNone)):
+			return returnForNone()
+		return (returnForNone,)
 
-	if ((isinstance(item, (str, typing.Mapping, typing.MutableMapping)) or (not isinstance(item, typing.Iterable))) or (isinstance(item, tuple(ensure_container(elementTypes, convertNone = True))))):
+	if ((isinstance(item, (str, ELEMENT, typing.Mapping, typing.MutableMapping)) or (not isinstance(item, typing.Iterable))) or (isinstance(item, tuple(ensure_container(elementTypes, convertNone = True))))):
 		return (item,)
 
 	if (not isinstance(item, (list, tuple, set))):
