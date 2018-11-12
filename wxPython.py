@@ -6,11 +6,32 @@ import operator
 import functools
 
 if (__name__ == "__main__"):
+	import common
 	import LICENSE_forSections as Legal
 else:
+	from . import common
 	from . import LICENSE_forSections as Legal
 
-NULL = object()
+NULL = common.NULL	
+
+def wrap_skipEvent():
+	def decorator(function):
+		@functools.wraps(function)
+		def wrapper(self, event = None, *args, **kwargs):
+			"""Ensures the event gets skipped.
+
+			Example Usage: @wrap_skipEvent()
+			"""
+
+			try:
+				return function(self, event, *args, **kwargs)
+
+			finally:
+				if (event is not None):
+					event.Skip()
+
+		return wrapper
+	return decorator
 
 class AutocompleteTextCtrl(wx.TextCtrl):
 	"""Modified code from: https://bitbucket.org/raz/wxautocompletectrl/src/default/autocomplete.py"""

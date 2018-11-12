@@ -4,7 +4,19 @@ import typing
 import inspect
 import collections
 
-NULL = object()
+class Singleton():
+	"""Used to get values correctly.
+
+	Example Use: FLAG = MyUtilities.common.Singleton("FLAG")
+	"""
+
+	def __init__(self, label = "Singleton"):
+		self.label = label
+
+	def __repr__(self):
+		return f"{self.label}()"
+
+NULL = Singleton("NULL")
 
 class ELEMENT():
 	"""Used to make a class pass ensure_container() as an element instead of a container."""
@@ -226,7 +238,7 @@ def ensure_container(item, evaluateGenerator = True, convertNone = True, element
 		return item
 	return item
 
-def ensure_dict(catalogue, default = None):
+def ensure_dict(catalogue, default = None, *, useAsKey = True):
 	"""Makes sure the given catalogue is a dictionary.
 
 	Example Input: ensure_dict(relation, attribute)
@@ -234,7 +246,10 @@ def ensure_dict(catalogue, default = None):
 
 	if (isinstance(catalogue, dict)):
 		return catalogue
-	return {catalogue: default}
+	
+	if (useAsKey):
+		return {catalogue: default}
+	return {default: catalogue}
 
 def ensure_default(value, default = None, *, defaultFlag = None):
 	"""Returns 'default' if 'value' is 'defaultFlag'.
@@ -466,6 +481,55 @@ def getClass(function):
 
 	return getattr(function, '__objclass__', None)
 
+def yieldSubClass(cls, *, getNested = True, include = None, exclude = None):
+	"""Returns a list of all subclasses belonging to the given class.
+
+	getNested (bool) - Determines if the subclasses of the subclasses will also be returned
+	include (list) - A list of modules that the subclasses must be from
+		- If None: Does nothing
+	exclude (list) - A list of modules that the subclasses cannot be from
+		- If None: Does nothing
+
+	Example Input: yieldSubClass(myClass)
+	"""
+
+	if (include is None):
+		if (exclude is None):
+			def isOk(_cls):
+				return True
+		else:
+			exclude = ensure_container(exclude)
+			def isOk(_cls):
+				return _cls.__module__ not in exclude
+	else:
+		include = ensure_container(include)
+		if (exclude is None):
+			def isOk(_cls):
+				return _cls.__module__ in include
+		else:
+			exclude = ensure_container(exclude)
+			def isOk(_cls):
+				return (_cls.__module__ not in exclude) and (_cls.__module__ in include)
+
+	def yieldSubSubClass(_cls):
+		nonlocal getNested
+
+		for sub in _cls.__subclasses__():
+			if (isOk(sub)):
+				yield sub
+
+			if (not getNested):
+				continue
+
+			for subSub in yieldSubSubClass(sub):
+				if (isOk(subSub)):
+					yield subSub
+
+	#########################
+
+	for item in yieldSubSubClass(cls):
+		yield item
+
 class CommonFunctions():
 	@classmethod
 	def nestedUpdate(cls, *args, **kwargs):
@@ -486,6 +550,10 @@ class CommonFunctions():
 	@classmethod
 	def _Munge(cls, *args, **kwargs):
 		return _Munge(*args, **kwargs)
+
+	@classmethod
+	def yieldSubClass(cls, *args, **kwargs):
+		return yieldSubClass(cls, *args, **kwargs)
 	
 #Decorators
 def setDocstring(docstring):
