@@ -1,5 +1,6 @@
 import os
 import sys
+import shutil
 import typing
 import inspect
 import collections
@@ -530,6 +531,24 @@ def yieldSubClass(cls, *, getNested = True, include = None, exclude = None):
 	for item in yieldSubSubClass(cls):
 		yield item
 
+def removeDir(filePath):
+	"""Removes the given directory if it exists."""
+
+	def onerror(function, path, exc_info):
+		"""An Error handler for shutil.rmtree.
+		Modified code from Justin Peel on https://stackoverflow.com/questions/2656322/shutil-rmtree-fails-on-windows-with-access-is-denied
+		"""
+
+		import stat
+
+		if (not os.access(path, os.W_OK)):
+			os.chmod(path, stat.S_IWUSR)
+			function(path)
+		else:
+			raise
+
+	shutil.rmtree(filePath, ignore_errors = False, onerror = onerror)
+
 class CommonFunctions():
 	@classmethod
 	def nestedUpdate(cls, *args, **kwargs):
@@ -554,6 +573,10 @@ class CommonFunctions():
 	@classmethod
 	def yieldSubClass(cls, *args, **kwargs):
 		return yieldSubClass(cls, *args, **kwargs)
+
+	@classmethod
+	def removeDir(cls, *args, **kwargs):
+		return removeDir(*args, **kwargs)
 	
 #Decorators
 def setDocstring(docstring):

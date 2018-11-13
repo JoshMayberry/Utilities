@@ -2,6 +2,7 @@ import wx
 import wx.html
 
 import re
+import types
 import operator
 import functools
 
@@ -24,7 +25,10 @@ def wrap_skipEvent():
 			"""
 
 			try:
-				return function(self, event, *args, **kwargs)
+				# if (isinstance(function, types.MethodType)):
+					return function(self, event, *args, **kwargs)
+				# else:
+				# 	return function(event, *args, **kwargs)
 
 			finally:
 				if (event is not None):
