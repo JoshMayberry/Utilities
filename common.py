@@ -274,16 +274,30 @@ def ensure_dict(catalogue, default = None, *, useAsKey = True):
 		return {catalogue: default}
 	return {default: catalogue}
 
-def ensure_default(value, default = None, *, defaultFlag = None):
+def ensure_default(value, default = None, *, defaultFlag = None, condition = None):
 	"""Returns 'default' if 'value' is 'defaultFlag'.
 	otherwise returns 'value'.
+
+	condition (callable) - An extra condition that must be met
+		- If None: Does nothing
 
 	Example Input: ensureDefault(autoPrint, False)
 	Example Input: ensureDefault(autoPrint, lambda: self.checkPermission("autoPrint"))
 	Example Input: ensureDefault(autoPrint, defaultFlag = NULL)
 	"""
 
-	if (value is defaultFlag):
+	def useDefault():
+		nonlocal value, defaultFlag
+
+		if (value is defaultFlag):
+			return True
+
+		if ((condition is not None) and condition(value)):
+			return True
+
+	######################################
+
+	if (useDefault()):
 		if (callable(default)):
 			return default()
 		return default
