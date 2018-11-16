@@ -210,17 +210,24 @@ def ensure_list(item, convertNone = False):
 	if (convertNone):
 		return []
 
-def ensure_container(item, evaluateGenerator = True, convertNone = True, elementTypes = None, returnForNone = None):
+def ensure_container(item, *, convertNone = True, returnForNone = None, 
+	evaluateGenerator = True, elementTypes = None, elementCriteria = None):
 	"""Makes sure the given item is a container.
 
-	elementTypes (list) - Extra types that are ok to be elements
 	returnForNone (any) - What should be returned if 'item' is None
 		- If function: will return whatever the function returns
+
+	elementTypes (list) - Extra types that are ok to be elements
+	elementCriteria (tuple) - Allows for formatted tuples to pass as elements if they match the criteria
+		~ (required length (int), required type (type))
+		- If None: Will count all tuples as containers
 
 	Example Input: ensure_container(valueList)
 	Example Input: ensure_container(valueList, convertNone = False)
 	Example Input: ensure_container(valueList, evaluateGenerator = False)
+
 	Example Input: ensure_container(handle, elementTypes = (Base,))
+	Example Input: ensure_container((255, 255, 0), elementCriteria = (3, int))
 	"""
 
 	if (item is None):
@@ -233,21 +240,36 @@ def ensure_container(item, evaluateGenerator = True, convertNone = True, element
 	if ((isinstance(item, (str, ELEMENT, typing.Mapping, typing.MutableMapping)) or (not isinstance(item, typing.Iterable))) or (isinstance(item, tuple(ensure_container(elementTypes, convertNone = True))))):
 		return (item,)
 
+	if ((elementCriteria is not None) and isinstance(item, (tuple, list))):
+		if (not item):
+			return ()
+
+		requiredLength, requiredType = elementCriteria
+		if ((len(item) != requiredLength) or (any((not isinstance(subItem, requiredType)) for subItem in item))):
+			return item
+		return (item,)
+
 	if (not isinstance(item, (list, tuple, set))):
 		if (evaluateGenerator and not callable(item)):
-			return tuple(item)
+			return ensure_container(tuple(item), convertNone = convertNone, returnForNone = returnForNone, evaluateGenerator = evaluateGenerator, elementTypes = elementTypes, elementCriteria = elementCriteria)
 		return item
 	return item
 
 def ensure_dict(catalogue, default = None, *, useAsKey = True):
 	"""Makes sure the given catalogue is a dictionary.
 
+	useAsKey (bool) - Determines how 'catalogue' is used if it is not a dictionary
+		- If True: {catalogue: default}
+		- If False: {default: catalogue}
+		- If None: {catalogue: catalogue}
+
 	Example Input: ensure_dict(relation, attribute)
 	"""
 
 	if (isinstance(catalogue, dict)):
 		return catalogue
-	
+	if (useAsKey is None):
+		return {catalogue: catalogue}
 	if (useAsKey):
 		return {catalogue: default}
 	return {default: catalogue}
@@ -267,7 +289,7 @@ def ensure_default(value, default = None, *, defaultFlag = None):
 		return default
 	return value
 
-class Ensure():
+class EnsureFunctions():
 	@classmethod
 	def ensure_set(cls, *args, **kwargs):
 		return ensure_set(*args, **kwargs)
@@ -604,7 +626,56 @@ def setDocstring(docstring):
 		return function
 	return decorator
 
-def lazyProperty(variable = None, default = NULL, defaultVariable = None, 
+def makeProperty(*, publisher = None, subscription = None):
+	"""Turns the decorated class into a property.
+	Uses the docstring of the class for the docstring of the property.
+	Uses the functions getter, setter, and remover to create the property.
+
+	publisher (module) - The pubsub module to use for 'subscription'
+		- If None: 'subscription' will not be used
+	subscription (str) - A pubsub subscription label to subscribe the setter to
+		~ Note: You will have to pass in the self parameter as a different kwarg for this to work
+		- If None: Will use the property name as the subscription label
+	_________________________________________
+	
+	Example Use:
+		class Test():
+			@makeProperty()
+			class lorem():
+				'''Lorem ipsum dolor sit amet.'''
+
+				def getter(self):
+					return self.ipsum
+
+				def setter(self, value):
+					self.ipsum = value
+
+				def remover(self):
+					del self.ipsum
+
+	Use Variation:
+		@makeProperty(publisher = pubsub.pub)
+		class lorem(classHandle = None):
+
+	Use Variation:
+		@makeProperty(publisher = pubsub.pub, subscription = "dolor")
+		class lorem(classHandle = None):
+	"""
+
+	def decorator(cls):
+		setter = getattr(cls, "setter", None)
+		if (publisher is not None):
+			publisher.subscribe(setter, subscription or cls.__name__)
+
+		return property(
+			fset = setter, 
+			fget = getattr(cls, "getter", None), 
+			fdel = getattr(cls, "remover", None), 
+			doc = cls.__doc__ or None)
+
+	return decorator
+
+def lazyProperty(variable = None, *, default = NULL, defaultVariable = None, 
 	catalogueVariable_all = "_lazyProperties_all", catalogueVariable_used = "_lazyProperties_used"):
 	"""Crates a property using the decorated function as the getter.
 	The docstring of the decorated function becomes the docstring for the property.
