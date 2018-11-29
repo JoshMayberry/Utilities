@@ -5,9 +5,12 @@ import wx.lib.wordwrap
 import re
 import math
 import types
+
 import operator
 import functools
 import contextlib
+
+import PIL
 
 if (__name__ == "__main__"):
 	import common
@@ -18,7 +21,7 @@ else:
 
 NULL = common.NULL	
 
-def wrap_skipEvent():
+def wrap_skipEvent(includeSelf = True):
 	def decorator(function):
 		@functools.wraps(function)
 		def wrapper(self, event = None, *args, **kwargs):
@@ -29,9 +32,10 @@ def wrap_skipEvent():
 
 			try:
 				# if (isinstance(function, types.MethodType)):
+				if (includeSelf):
 					return function(self, event, *args, **kwargs)
-				# else:
-				# 	return function(event, *args, **kwargs)
+				else:
+					return function(event, *args, **kwargs)
 
 			finally:
 				if (event is not None):
@@ -898,7 +902,7 @@ def getImage(imagePath, internal = False, *, alpha = True,
 		if (rotate is None):
 			return image
 
-		image.SetMaskColour(getColor(rotateColor, returnForNone = wx.WHITE))
+		image.SetMaskColour(*getColor(rotateColor, returnForNone = wx.WHITE).Get(includeAlpha = False))
 		if (isinstance(rotate, (list, tuple))):
 			rotate = rotate[0]
 			center = rotate[1]
@@ -964,16 +968,18 @@ def yieldColor(colorList, *, returnForNone = wx.NullColour):
 
 	def formatColor(color):
 		for element in color:
+			#Ensure numbers are between 0 and 255
 			if (isinstance(element, float)):
-				yield math.ceil(element * 255)
+				yield min(255, max(0, math.ceil(element * 255)))
 			else:
-				yield element
+				yield min(255, max(0, element))
 
 	##############################
 
-	for color in common.ensure_container(colorList, elementCriteria = (3, int)):
+	for color in common.ensure_container(colorList, elementCriteria = ((3, int), (4, int)), convertNone = False):
 		if (color is None):
-			yield returnForNone
+			for item in yieldColor(returnForNone):
+				yield item
 			continue
 
 		if (isinstance(color, wx.Colour)):
@@ -1036,10 +1042,12 @@ fontCatalogue = {
 		None: wx.DEFAULT
 	},
 }
-def getFont(size = None, bold = False, italic = False, color = None, family = None):
+def getFont(size = NULL, font = None, *, bold = NULL, italic = NULL, family = NULL, underline = NULL, strikethrough = NULL):
 	"""Returns a wxFont object.
+	Can modify an existing wxFont object.
 
-	size (int)    - The font size of the text  
+	size (int)    - The font size of the text in points
+		- If Tuple: Uses in pixels instead of points
 	bold (bool)   - Determines the boldness of the text
 		- If True: The font will be bold
 		- If False: The font will be normal
@@ -1048,20 +1056,67 @@ def getFont(size = None, bold = False, italic = False, color = None, family = No
 		- If True: The font will be italicized
 		- If False: The font will not be italicized
 		- If None: The font will be slanted
-	color (str)   - The color of the text. Can be an RGB tuple (r, g, b) or hex value
-		- If None: Will use black
 	family (str)  - What font family it is.
 		~ "times new roman"
 
 	Example Input: getFont()
 	Example Input: getFont(size = 72, bold = True, color = "red")
+	Example Input: getFont(size = (32, 32), bold = True, color = "red")
 	"""
 
-	return wx.Font(
-		common.ensure_default(size, default = wx.DEFAULT), 
-		fontCatalogue["family"].get(family, wx.DEFAULT), 
-		fontCatalogue["italic"].get(italic, wx.NORMAL), 
-		fontCatalogue["bold"].get(bold, wx.NORMAL))
+	def _getSize(_size):
+		if (_size is NULL):
+			return wx.DEFAULT
+
+		if (isinstance(_size, (int, wx.Size))):
+			return _size
+
+		return wx.Size(*_size)
+
+	def _getUnderline(_underline):
+		return common.ensure_default(_underline, default = False, defaultFlag = NULL)
+
+	def _getStrikethrough(_strikethrough):
+		return common.ensure_default(_strikethrough, default = False, defaultFlag = NULL)
+
+	def _getBold(_bold):
+		return fontCatalogue["bold"].get(common.ensure_default(_bold, default = False, defaultFlag = NULL), wx.NORMAL)
+
+	def _getFamily(_family):
+		return fontCatalogue["family"].get(common.ensure_default(_family, default = None, defaultFlag = NULL), wx.DEFAULT)
+
+	def _getItalic(_italic):
+		return fontCatalogue["italic"].get(common.ensure_default(_italic, default = False, defaultFlag = NULL), wx.NORMAL)
+
+	def _getFont():
+		nonlocal font
+
+		if (font is None):
+			return wx.Font(_getSize(size), _getFamily(family), _getItalic(italic), _getBold(bold))
+		_font = wx.Font(font)
+
+		if (size is not NULL):
+			_font.SetPointSize(_size)
+
+		if (family is not NULL):
+			_font.SetFamily(_family)
+
+		if (bold is not NULL):
+			_font.SetWeight(_bold)
+
+		if (italic is not NULL):
+			_font.SetStyle(_italic)
+
+		return _font
+
+	#############################################
+
+	_font = _getFont()
+
+	_font.SetUnderlined(_getUnderline(underline))
+	_font.SetStrikethrough(_getStrikethrough(strikethrough))
+
+	return _font
 
 def getWildcard(wildcard = None):
 	"""Returns a formatted file picker wildcard.
@@ -1126,34 +1181,9 @@ def getPen(color, width = 1):
 
 	Example Input: getPen((255, 0, 0))
 	Example Input: getPen((255, 0, 0), 3)
-	Example Input: getPen([(255, 0, 0), (0, 255, 0)])
 	"""
 
-	#Account for brush lists
-	multiple = False
-	if (isinstance(color[0], (tuple, list))):
-		multiple = True
-
-	#Create a brush list
-	if (multiple):
-		penList = []
-		for i, item in enumerate(color):
-			#Determine color
-			if (multiple):
-				color = wx.Colour(color[0], color[1], color[2])
-			else:
-				color = wx.Colour(color[i][0], color[i][1], color[i][2])
-
-			pen = wx.Pen(color, int(width))
-			penList.append(pen)
-		pen = penList
-
-	#Create a single pen
-	else:
-		color = wx.Colour(color[0], color[1], color[2])
-		pen = wx.Pen(color, int(width))
-
-	return pen
+	return wx.Pen(getColor(color), int(width))
 
 def getBrush(color, style = "solid", image = None, internal = False):
 	"""Returns a pen or list of pens to the user.
@@ -1345,16 +1375,27 @@ def getBrushStyle(style, image = None, internal = False):
 
 	return style, image
 
-def _drawText(dc, text, x = 0, y = 0, size = 12, angle = None, x_offset = 0, y_offset = 0,
-	color = (0, 0, 0), bold = False, italic = False, family = None, font = None,
-	wrap = None, align = None, x_align = None, y_align = None):
+_alignCatalogue = {
+	"x": {
+		"left": wx.ALIGN_LEFT, 
+		"right": wx.ALIGN_RIGHT, 
+		"center": wx.ALIGN_CENTER_HORIZONTAL,
+	},
+	"y": {
+		"top": wx.ALIGN_TOP, 
+		"bottom": wx.ALIGN_BOTTOM, 
+		"center": wx.ALIGN_CENTER_VERTICAL,
+	},
+}
+def _drawText(dc, text, *, x = 0, y = 0, x_offset = 0, y_offset = 0, angle = None, 
+	color = None, isSelected = False, isEnabled = True, 
+	wrap = None, align = None, x_align = None, y_align = None, **fontKwargs):
 	"""Draws text on the canvas.
 	Special thanks to Milan Skala for how to center text on http://wxpython-users.1045709.n5.nabble.com/Draw-text-over-an-existing-bitmap-td5725527.html
 
 	text (str)    - The text that will be drawn on the canvas
 	x (int)       - The x-coordinate of the text on the canvas
 	y (int)       - The y-coordinate of the text on the canvas
-	size (int)    - The size of the text in word editor format
 	angle (int)   - If not None: The angle in degrees that the text will be rotated. Positive values rotate it counter-clockwise
 	color (tuple) - (R, G, B) as integers
 
@@ -1385,114 +1426,130 @@ def _drawText(dc, text, x = 0, y = 0, size = 12, angle = None, x_offset = 0, y_o
 	Example Input: _drawText(dc, "Lorem Ipsum", align = (0, 10, 275, 455), x_align = "center")
 	Example Input: _drawText(dc, "Lorem Ipsum", align = (0, 10, 275, 455), x_align = "center", angle = 90)
 	"""
+	global _alignCatalogue
+
+	def _getColor():
+		nonlocal color
+
+		if (color is not None):
+			return getColor(color)
+		
+		if (not isEnabled):
+			return wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT)
+		
+		if (isSelected):
+			#Use: https://wxpython.org/Phoenix/docs/html/wx.SystemColour.enumeration.html
+			return wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHTTEXT)
+		
+		return wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNTEXT)
+
+	def _getPosition():
+		nonlocal dc, angle, align
+
+		if ((align is None) or (angle in (None, 0))):
+			return x + x_offset, y + y_offset
+
+		def _get_x():
+			nonlocal x_align, width, height
+
+			if (x_align in (None, "left")):
+				_x = 0
+				if (angle >= 270):
+					return _x + x_offset + height
+				if (angle >= 180):
+					return _x + x_offset + width
+				if (angle >= 90):
+					return _x + x_offset + 0
+				return _x + x_offset + 0
+
+			if (x_align == "right"):
+				_x = align.width - width
+				if (angle >= 270):
+					return _x + x_offset + width
+				if (angle >= 180):
+					return _x + x_offset + width
+				if (angle >= 90):
+					return _x + x_offset + width - height
+				return _x + x_offset + 0
+			
+			_x = (align.width - width) / 2
+			if (angle >= 270):
+				return _x + x_offset + width / 2 + height / 2
+			if (angle >= 180):
+				return _x + x_offset + width
+			if (angle >= 90):
+				return _x + x_offset + width / 2 - height / 2
+			return _x + x_offset + 0
+
+		def _get_y():
+			nonlocal y_align, width, height
+
+			if (y_align in (None, "top")):
+				_y = 0
+				if (angle >= 270):
+					return _y + y_offset + 0
+				if (angle >= 180):
+					return _y + y_offset + height
+				if (angle >= 90):
+					return _y + y_offset + width
+				return _y + y_offset + 0
+
+			if (y_align == "bottom"):
+				_y = align.height - height
+				if (angle >= 270):
+					return _y + y_offset + -width + height
+				if (angle >= 180):
+					return _y + y_offset + height
+				if (angle >= 90):
+					return _y + y_offset + height
+				return _y + y_offset + 0
+
+				_y = (align.height - height) / 2
+				if (angle >= 270):
+					return _y + y_offset + -width / 2 + height / 2
+				if (angle >= 180):
+					return _y + y_offset + height
+				if (angle >= 90):
+					return _y + y_offset + width / 2 + height / 2
+				return _y + y_offset + 0
+
+		######################
+
+		align = wx.Rect(align)
+		width, height = dc.GetTextExtent(_text)
+
+		return _get_x(), _get_y()
+
+	def applyWrap():
+		nonlocal text, wrap
+
+		if ((wrap is not None) and (not isinstance(wrap, int))):
+			wrap = wx.Rect(wrap)
+		if (wrap):
+			if (isinstance(wrap, int)):
+				return wx.lib.wordwrap.wordwrap(text, dc.DeviceToLogicalX(wrap), dc)
+			else:
+				return wx.lib.wordwrap.wordwrap(text, dc.DeviceToLogicalX(wrap[2] - wrap[0]), dc)
+		return text
+
+	######################################################
 
 	oldColor = dc.GetTextForeground()
 	oldFont = dc.GetFont()
 	try:
-		if ((wrap is not None) and (not isinstance(wrap, int))):
-			wrap = wx.Rect(wrap)
-		if (wrap):
-			dc.SetFont(font)
-			if (isinstance(wrap, int)):
-				_text = wx.lib.wordwrap.wordwrap(text, dc.DeviceToLogicalX(wrap), dc)
-			else:
-				_text = wx.lib.wordwrap.wordwrap(text, dc.DeviceToLogicalX(wrap[2] - wrap[0]), dc)
+		dc.SetFont(getFont(**fontKwargs))
+		dc.SetPen(getPen(_getColor()))
+
+		_x, _y = _getPosition()
+		_text = applyWrap()
+
+		if (angle not in (None, 0)):
+			dc.DrawRotatedText(_text, _x, _y, angle)
+		elif (align is None):
+			dc.DrawText(_text, _x, _y)
 		else:
-			_text = text
+			dc.DrawLabel(_text, (_x + align[0], _y + align[1], align[2], align[3]), alignment = _alignCatalogue.get(x_align, 0)|_alignCatalogue.get(y_align, wx.ALIGN_TOP))
 
-		if (font is None):
-			font = getFont(size = size, bold = bold, italic = italic, color = color, family = family)
-		dc.SetFont(font)
-
-		pen = getPen(color)
-		dc.SetPen(pen)
-
-		if (align is not None):
-			align = wx.Rect(align)
-		if (angle in [None, 0]):
-			if (x_align is None):
-				x_align = 0
-			else:
-				x_align = {"l": wx.ALIGN_LEFT, "r": wx.ALIGN_RIGHT, "c": wx.ALIGN_CENTER_HORIZONTAL}[x_align[0].lower()]
-
-			if (y_align is None):
-				y_align = wx.ALIGN_TOP
-			else:
-				y_align = {"t": wx.ALIGN_TOP, "b": wx.ALIGN_BOTTOM, "c": wx.ALIGN_CENTER_VERTICAL}[y_align[0].lower()]
-		else:
-			dc.SetFont(font)
-			width, height = dc.GetTextExtent(_text)
-
-			if (x_align in [None, "l"]):
-				x_align = 0
-				if (angle >= 270):
-					x_offset += height
-				elif (angle >= 180):
-					x_offset += width
-				elif (angle >= 90):
-					x_offset += 0
-				else:
-					x_offset += 0
-
-			elif (x_align == "r"):
-				x_align = align.width - width
-				if (angle >= 270):
-					x_offset += width
-				elif (angle >= 180):
-					x_offset += width
-				elif (angle >= 90):
-					x_offset += width - height
-				else:
-					x_offset += 0
-			else:
-				x_align = (align.width - width) / 2
-				if (angle >= 270):
-					x_offset += width / 2 + height / 2
-				elif (angle >= 180):
-					x_offset += width
-				elif (angle >= 90):
-					x_offset += width / 2 - height / 2
-				else:
-					x_offset += 0
-
-			if (y_align in [None, "t"]):
-				y_align = 0
-				if (angle >= 270):
-					y_offset += 0
-				elif (angle >= 180):
-					y_offset += height
-				elif (angle >= 90):
-					y_offset += width
-				else:
-					y_offset += 0
-
-			elif (y_align == "b"):
-				y_align = align.height - height
-				if (angle >= 270):
-					y_offset += -width + height
-				elif (angle >= 180):
-					y_offset += height
-				elif (angle >= 90):
-					y_offset += height
-				else:
-					y_offset += 0
-			else:
-				y_align = (align.height - height) / 2
-				if (angle >= 270):
-					y_offset += -width / 2 + height / 2
-				elif (angle >= 180):
-					y_offset += height
-				elif (angle >= 90):
-					y_offset += width / 2 + height / 2
-				else:
-					y_offset += 0
-
-		if ((angle is not None) and (angle != 0)):
-			dc.DrawRotatedText(_text, x + x_align + x_offset, y + y_align + y_offset, angle)
-		elif (align is not None):
-			dc.DrawLabel(_text, (x + x_offset, y + y_offset, align[2], align[3]), alignment = x_align|y_align)
-		else:
-			dc.DrawText(_text, x + x_offset + y_offset, y)
 	finally:
 		dc.SetFont(oldFont)
 		dc.SetTextForeground(oldColor)

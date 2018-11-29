@@ -1,5 +1,7 @@
 import os
 import sys
+
+import stat
 import shutil
 import typing
 import inspect
@@ -228,6 +230,7 @@ def ensure_container(item, *, convertNone = True, returnForNone = None,
 
 	Example Input: ensure_container(handle, elementTypes = (Base,))
 	Example Input: ensure_container((255, 255, 0), elementCriteria = (3, int))
+	Example Input: ensure_container((255, 255, 0), elementCriteria = ((3, int), (4, int)))
 	"""
 
 	if (item is None):
@@ -244,10 +247,12 @@ def ensure_container(item, *, convertNone = True, returnForNone = None,
 		if (not item):
 			return ()
 
-		requiredLength, requiredType = elementCriteria
-		if ((len(item) != requiredLength) or (any((not isinstance(subItem, requiredType)) for subItem in item))):
-			return item
-		return (item,)
+		if (not isinstance(elementCriteria[0], tuple)):
+			elementCriteria = (elementCriteria,)
+		for requiredLength, requiredType in elementCriteria:
+			if ((len(item) == requiredLength) and (all((isinstance(subItem, requiredType)) for subItem in item))):
+				return (item,)
+		return item
 
 	if (not isinstance(item, (list, tuple, set))):
 		if (evaluateGenerator and not callable(item)):
@@ -274,7 +279,7 @@ def ensure_dict(catalogue, default = None, *, useAsKey = True):
 		return {catalogue: default}
 	return {default: catalogue}
 
-def ensure_default(value, default = None, *, defaultFlag = None, condition = None):
+def ensure_default(value, default = None, *, consumeFunction = True, defaultFlag = None, condition = None):
 	"""Returns 'default' if 'value' is 'defaultFlag'.
 	otherwise returns 'value'.
 
@@ -284,6 +289,7 @@ def ensure_default(value, default = None, *, defaultFlag = None, condition = Non
 	Example Input: ensureDefault(autoPrint, False)
 	Example Input: ensureDefault(autoPrint, lambda: self.checkPermission("autoPrint"))
 	Example Input: ensureDefault(autoPrint, defaultFlag = NULL)
+	Example Input: ensureDefault(myFunction, self.checkPermission, consumeFunction = False)
 	"""
 
 	def useDefault():
@@ -298,10 +304,23 @@ def ensure_default(value, default = None, *, defaultFlag = None, condition = Non
 	######################################
 
 	if (useDefault()):
-		if (callable(default)):
+		if (consumeFunction and callable(default)):
 			return default()
 		return default
 	return value
+
+def ensure_string(value, *, returnForNone = ""):
+	"""Returns 'value' as a string.
+
+	returnForNone (str) - What to return if 'value' is None
+
+	Example Input: ensure_string(value)
+	Example Input: ensure_string(value, returnForNone = "Empty")
+	"""
+
+	if (value is None):
+		return returnForNone
+	return f"{value}"
 
 class EnsureFunctions():
 	@classmethod
@@ -320,10 +339,13 @@ class EnsureFunctions():
 	def ensure_dict(cls, *args, **kwargs):
 		return ensure_dict(*args, **kwargs)
 
-
 	@classmethod
 	def ensure_default(cls, *args, **kwargs):
 		return ensure_default(*args, **kwargs)
+
+	@classmethod
+	def ensure_string(cls, *args, **kwargs):
+		return ensure_string(*args, **kwargs)
 
 #Etc
 def nestedUpdate(target, catalogue, *, preserveNone = True):
@@ -575,8 +597,6 @@ def removeDir(filePath):
 		Modified code from Justin Peel on https://stackoverflow.com/questions/2656322/shutil-rmtree-fails-on-windows-with-access-is-denied
 		"""
 
-		import stat
-
 		if (not os.access(path, os.W_OK)):
 			os.chmod(path, stat.S_IWUSR)
 			function(path)
@@ -689,7 +709,7 @@ def makeProperty(*, publisher = None, subscription = None):
 
 	return decorator
 
-def lazyProperty(variable = None, *, default = NULL, defaultVariable = None, 
+def lazyProperty(variable = None, *, default = NULL, defaultVariable = None, readOnly = False,
 	catalogueVariable_all = "_lazyProperties_all", catalogueVariable_used = "_lazyProperties_used"):
 	"""Crates a property using the decorated function as the getter.
 	The docstring of the decorated function becomes the docstring for the property.
@@ -703,6 +723,10 @@ def lazyProperty(variable = None, *, default = NULL, defaultVariable = None,
 	defaultVariable (str) - The name of a kwarg in 'function' to use for 'default'
 		- If None: Uses "default"
 		Note: this must be a kwarg, not an arg with a default; this means it must appear after *
+
+	readOnly (bool) - Determines if the value can be set once initialized or not
+		- If False: The decorated function is the setter
+		- If True: The decorated function is used once to initialize the property
 
 	catalogueVariable_all (str) - The name of a variable for a set to add each lazy property name to 
 		- If None: Will not catalogue variable names
@@ -734,8 +758,6 @@ def lazyProperty(variable = None, *, default = NULL, defaultVariable = None,
 	"""
 
 	def decorator(function):
-		import sys
-
 		if (catalogueVariable_all is not None):
 			module = inspect.getmodule(function)
 			if (not hasattr(module, catalogueVariable_all)):
@@ -752,12 +774,12 @@ def lazyProperty(variable = None, *, default = NULL, defaultVariable = None,
 			_default = None
 
 		def getter(self):
-			nonlocal getter_runOnce, getter, setter, _default, catalogueVariable_used #Both functions must have the same number of 'free variables' to replace __code__
+			nonlocal getter_runOnce, getter, initializer, _default, catalogueVariable_used #Both functions must have the same number of 'free variables' to replace __code__
 			return getattr(self, _variable)
 
 		def getter_runOnce(self):
 			if (not hasattr(self, _variable)):
-				setter(self, _default)
+				initializer(self, _default)
 
 			if (catalogueVariable_used is not None):
 				if (not hasattr(self, catalogueVariable_used)):
@@ -768,11 +790,16 @@ def lazyProperty(variable = None, *, default = NULL, defaultVariable = None,
 			getter_runOnce.__code__ = getter.__code__
 			return getattr(self, _variable)
 
-		def setter(self, value):
+		def initializer(self, value):
 			setattr(self, _variable, function(self, value))
 
 		def remover(self):
 			delattr(self, _variable)
+
+		if (readOnly):
+			setter = None
+		else:
+			setter = initializer
 
 		return property(fget = getter_runOnce, fset = setter, fdel = remover, doc = function.__doc__)
 	return decorator
