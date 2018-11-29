@@ -1,39 +1,128 @@
 import lazy_import
 
-lazy_import.lazy_module("os")
-lazy_import.lazy_module("re")
-lazy_import.lazy_module("sys")
-lazy_import.lazy_module("math")
-lazy_import.lazy_module("types")
+_loadCatalogue = {
+	"wx": (
+		"wx.adv", 
+		"wx.grid", 
+		"wx.html", 
 
-lazy_import.lazy_module("shutil")
-lazy_import.lazy_module("typing")
-lazy_import.lazy_module("inspect")
+		"wx.lib.masked", 
+		"wx.lib.buttons", 
+		"wx.lib.dialogs", 
+		"wx.lib.newevent", 
+		"wx.lib.wordwrap", 
+		"wx.lib.splitter", 
+		"wx.lib.scrolledpanel", 
+		"wx.lib.mixins.listctrl", 
 
-lazy_import.lazy_module("operator")
-lazy_import.lazy_module("functools")
-lazy_import.lazy_module("contextlib")
-lazy_import.lazy_module("collections")
+		"wx.lib.agw.aui", 
+		"wx.lib.agw.flatmenu", 
+		"wx.lib.agw.floatspin", 
+		"wx.lib.agw.multidirdialog", 
+		"wx.lib.agw.fourwaysplitter", 
+		"wx.lib.agw.ultimatelistctrl", 
+		"wx.lib.agw.genericmessagedialog", 
+	),
 
-lazy_import.lazy_module("PIL")
-lazy_import.lazy_module("stat")
+	"sqlalchemy": (
+		"sqlalchemy_utils",
+	),
 
-def load_wx():
-	"""Loads all the wxPython modules.
+	"serial": (
+		"serial.tools.list_ports",
+	),
 
-	Example Input: load_wx()
-	"""
-	
-	lazy_import.lazy_module("wx")
-	lazy_import.lazy_module("wx.html", level = "base")
-	lazy_import.lazy_module("wx.lib.wordwrap", level = "base")
+	"email": (
+		"email.encoders",
+		"email.mime.base.MIMEBase",
+		"email.mime.text.MIMEText",
+		"email.mime.multipart.MIMEMultipart",
+	),
 
-def load(name):
+	"xml": (
+		"xml.etree.cElementTree",
+	),
+
+	"ctypes": (
+		"ctypes.windll",
+	),
+
+	"distutils": (
+		"distutils.core.setup",
+	),
+
+	"Cryptodome": (
+		"Cryptodome.Random", 
+		"Cryptodome.Cipher.AES", 
+		"Cryptodome.PublicKey.RSA", 
+		"Cryptodome.Cipher.PKCS1_OAEP", 
+	),
+
+	"matplotlib": (
+		"matplotlib.pyplot", 
+	),
+
+	"Utilities": (
+		"Utilities.common", 
+		"Utilities.wxPython", 
+		"Utilities.debugging", 
+		"Utilities.subProcess", 
+		"Utilities.multiProcess",
+	),
+
+	# "forks": (
+	# 	{"name": "forks.pypubsub.src.pubsub.pub", "autoBase": False}
+	# ),
+}
+
+_typical = (
+	"re", "time", "math", "types", 
+	"abc", "enum", "shutil", "decimal", "datetime", 
+	"queue", "threading", "subprocess", 
+	"typing", "inspect", "warnings", "traceback", 
+	"operator", "itertools", "functools", "contextlib", "collections", 
+)
+
+def load(name = None, *moreNames, autoBase = True, useCatalogue = True, includeKey = True):
 	"""Lazy loads the given module.
 
-	Example Input: load(numpy)
-	"""
+	name (str) - What module to lazy load
+		- If None: Will load the list from '_typical'
+		- If list: Will load all modules given in the list
 
-	if (isinstance(name, str)):
-		return lazy_import.lazy_module(name)
-	return tuple(lazy_import.lazy_module(item) for item in name)
+	autoBase (bool) - Determines if the base is used instead of leaf for the import level
+	useCatalogue (bool) - Determines if '_loadCatalogue' is consulted for extra imports
+	includeKey (bool) - Determines if 'name' is included when using the catalogue
+
+	Example Input: load("numpy")
+	Example Input: load("numpy", "wx")
+	Example Input: load(("numpy", "wx"))
+	"""
+	global _typical, _loadCatalogue
+
+	def yieldModules():
+		if (includeKey):
+			yield lazy_import.lazy_module(name, level = ("leaf", "base")[autoBase])
+
+		for item in load(_loadCatalogue[name], autoBase = autoBase, useCatalogue = useCatalogue):
+			yield item
+
+	#####################
+	
+	if (name is None):
+		name = _typical
+
+	if (moreNames):
+		return load((name, *moreNames), autoBase = autoBase, useCatalogue = useCatalogue)
+
+	if (not isinstance(name, str)):
+		if (isinstance(name, dict)):
+			return load(**name, autoBase = autoBase, useCatalogue = useCatalogue)
+		return tuple(load(item, autoBase = autoBase, useCatalogue = useCatalogue) for item in name)
+
+	if (useCatalogue and (name in _loadCatalogue)):
+		return tuple(yieldModules())
+
+	return lazy_import.lazy_module(name, level = ("leaf", "base")[autoBase])
+
+load("Utilities")

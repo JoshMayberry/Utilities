@@ -1,5 +1,12 @@
 import lazyLoad
-lazyLoad.load(("common", "wxPython", "debugging", "subProcess", "multiProcess")) 
+lazyLoad.load("wx", useCatalogue = False)
+lazyLoad.load(
+	"PIL",
+	"stat",
+
+	"wx.html", 
+	"wx.lib.wordwrap", 
+) 
 
 from . import common
 from . import wxPython
