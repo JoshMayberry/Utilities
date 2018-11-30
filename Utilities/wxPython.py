@@ -191,13 +191,21 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 		self.Bind(wx.EVT_TEXT, self.OnTextUpdate)
 		self.Bind(wx.EVT_SIZE, self.OnSizeChange)
 		self.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown)
-		self.popup._suggestions.Bind(wx.EVT_LEFT_DOWN, self.OnSuggestionClicked)
-		self.popup._suggestions.Bind(wx.EVT_KEY_DOWN, self.OnSuggestionKeyDown)
-		self.Bind(wx.EVT_CONTEXT_MENU, self.OnRightClick)
+		self.Bind(wx.EVT_RIGHT_UP, self.OnRightClick)
 		self.Bind(wx.EVT_KILL_FOCUS, self.OnKillFocus)
+		self.popup._suggestions.Bind(wx.EVT_KEY_DOWN, self.OnSuggestionKeyDown)
+		self.popup._suggestions.Bind(wx.EVT_LEFT_DOWN, self.OnSuggestionClicked)
 
-	def SetValue(self, value = NULL, default = None):
-		# print("@SetValue", self.formatter)
+	def SetValue(self, value = NULL, default = None, triggerPopup = True):
+		def apply(_value):
+			nonlocal self, triggerPopup
+
+			if (not triggerPopup):
+				self.skipEvent_update = True
+
+			super(self.__class__, self).SetValue(_value)
+
+		################################
 
 		if (value is NULL):
 			value = self.Value
@@ -205,20 +213,20 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 		if (self.verifier):
 			if (not self.verifier(value)):
 				if (default is not None):
-					return super().SetValue(default)
+					return apply(default)
 				return
 
 		if (self.formatter):
 			value = self.formatter(value)
 			if (value is None):
 				if (default is not None):
-					return super().SetValue(default)
+					return apply(default)
 				return
 
 		if (self.previousValue is None):
 			self.previousValue = value
 
-		return super().SetValue(value)
+		return apply(value)
 
 	def AdjustPopupPosition(self):
 		self.popup.Position = self.ClientToScreen((0, self.Size.height)).Get()
@@ -311,8 +319,6 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 		event.Skip()
 
 	def OnSuggestionClicked(self, event):
-		# print("@OnSuggestionClicked")
-		
 		self.skipEvent_update = True
 		self.SetValue(self.popup.GetSuggestion(self.popup._suggestions.VirtualHitTest(event.Position[1])))
 		self.SetInsertionPointEnd()
@@ -1065,7 +1071,7 @@ def getFont(size = NULL, font = None, *, bold = NULL, italic = NULL, family = NU
 	"""
 
 	def _getSize(_size):
-		if (_size is NULL):
+		if (_size in (None, NULL)):
 			return wx.DEFAULT
 
 		if (isinstance(_size, (int, wx.Size))):
@@ -1538,7 +1544,7 @@ def _drawText(dc, text, *, x = 0, y = 0, x_offset = 0, y_offset = 0, angle = Non
 	oldFont = dc.GetFont()
 	try:
 		dc.SetFont(getFont(**fontKwargs))
-		dc.SetPen(getPen(_getColor()))
+		dc.SetTextForeground(_getColor())
 
 		_x, _y = _getPosition()
 		_text = applyWrap()

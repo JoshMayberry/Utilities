@@ -9,6 +9,7 @@ lazyLoad.load(
 ) 
 
 from . import common
+from . import caching
 from . import wxPython
 from . import debugging
 from . import subProcess

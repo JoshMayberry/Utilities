@@ -540,40 +540,56 @@ def getClass(function):
 
 	return getattr(function, '__objclass__', None)
 
-def yieldSubClass(cls, *, getNested = True, include = None, exclude = None):
-	"""Returns a list of all subclasses belonging to the given class.
+def yieldSubClass(cls, *, getNested = True, include = None, exclude = None, 
+	yieldBase = False, filterByModule = True, onlyName = False):
+	"""Returns a list of all subclasses (other instances that inheirt 'cls') belonging to the given class.
 
 	getNested (bool) - Determines if the subclasses of the subclasses will also be returned
+
 	include (list) - A list of modules that the subclasses must be from
 		- If None: Does nothing
+
 	exclude (list) - A list of modules that the subclasses cannot be from
 		- If None: Does nothing
+
+	yieldBase (bool) - Determines if the base classes (classes inherited by 'cls') should be returned instead of subclasses
+
+	filterByModule (bool) - Determiens if 'include' and 'exclude' refer to imported module names or class names
+
+	onlyName (bool) - Determines if only the class names are compared or if the whole namespace is compared
 
 	Example Input: yieldSubClass(myClass)
 	"""
 
-	if (include is None):
-		if (exclude is None):
-			def isOk(_cls):
-				return True
+	def isOk(_cls):
+		nonlocal include, exclude, onlyName
+
+		if (filterByModule):
+			if (onlyName):
+				compare = _cls.__module__.split(".")[-1]
+			else:
+				compare = _cls.__module__
 		else:
-			exclude = ensure_container(exclude)
-			def isOk(_cls):
-				return _cls.__module__ not in exclude
-	else:
-		include = ensure_container(include)
-		if (exclude is None):
-			def isOk(_cls):
-				return _cls.__module__ in include
-		else:
-			exclude = ensure_container(exclude)
-			def isOk(_cls):
-				return (_cls.__module__ not in exclude) and (_cls.__module__ in include)
+			if (onlyName):
+				compare = _cls.__name__
+			else:
+				compare = f"{_cls.__module__}.{_cls.__name__}"
+
+		if (compare in exclude):
+			return False
+
+		if ((not include) or (compare in include)):
+			return True
 
 	def yieldSubSubClass(_cls):
 		nonlocal getNested
 
-		for sub in _cls.__subclasses__():
+		if (yieldBase):
+			classList = _cls.__bases__
+		else:
+			classList = _cls.__subclasses__()
+
+		for sub in classList:
 			if (isOk(sub)):
 				yield sub
 
@@ -586,7 +602,19 @@ def yieldSubClass(cls, *, getNested = True, include = None, exclude = None):
 
 	#########################
 
+	include = ensure_container(include)
+	exclude = ensure_container(exclude)
+
 	for item in yieldSubSubClass(cls):
+		yield item
+
+def yieldBaseClass(*args, **kwargs):
+	"""Returns a list of all base classes (classes inherited by 'cls') belonging to the given class.
+
+	Example Input: yieldBaseClass(myClass)
+	"""
+
+	for item in yieldSubClass(*args, yieldBase = True, **kwargs):
 		yield item
 
 def removeDir(filePath):
@@ -629,6 +657,10 @@ class CommonFunctions():
 	@classmethod
 	def yieldSubClass(cls, *args, **kwargs):
 		return yieldSubClass(cls, *args, **kwargs)
+
+	@classmethod
+	def yieldBaseClass(cls, *args, **kwargs):
+		return yieldBaseClass(cls, *args, **kwargs)
 
 	@classmethod
 	def removeDir(cls, *args, **kwargs):
