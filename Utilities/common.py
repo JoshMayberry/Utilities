@@ -1,6 +1,8 @@
 import os
 import sys
+import ast
 
+import re
 import stat
 import shutil
 import typing
@@ -176,6 +178,189 @@ class CustomIterator():
 class _set(set):
 	def append(self, *args, **kwargs):
 		return self.add(*args, **kwargs)
+
+class _dict(dict):
+	"""A dictionary that can use circular references.
+
+	EXAMPLE USE:
+		x = _dict({
+			1: "Lorem", 
+			"1": "Ipsum", 
+			"ips": "${1}", 
+			"lor": "${1:int}", 
+			2: "${lor} Dolor ${1}", 
+			3: "Sit ${lor} Dolor ${1} Amet", 
+		})
+		print(x[3])
+	___________________________________________________________
+
+	EXAMPLE USE:
+		y = _dict({"lorem": "ipsum"}, caseSensitive = False)
+		print(y["Lorem"])
+	___________________________________________________________
+
+	EXAMPLE USE:
+		z = _dict({"1": "lorem"}, typeSensitive = False)
+		print(z[1])
+	"""
+
+	typeCatalogue = {
+		"int": int, int: int, 
+		"str": str, str: str, 
+		"None": ast.literal_eval, "eval": ast.literal_eval, "?": ast.literal_eval, 
+	}
+
+	def __init__(self, iterable = None, *, interpreter = NULL, caseSensitive = True, typeSensitive = True, **kwargs):
+		super().__init__()
+
+		self.caseSensitive = caseSensitive
+		self.typeSensitive = typeSensitive
+
+		self.setInterpreter(interpreter)
+		self.setSensitivity(caseSensitive = caseSensitive, typeSensitive = typeSensitive)
+
+		self.update(kwargs)
+		self.update(iterable)
+
+	def __setitem__(self, key, value):
+		"""Overridden to account for key formatting."""
+		super().__setitem__(self.formatKey(key), value)
+
+	def set(self, key, value = None):
+		"""Overridden to account for key formatting."""
+
+		return super().set(self.formatKey(key), value)
+
+	def __getitem__(self, key):
+		"""Overridden to account for key formatting."""
+		
+		return self.formatValue(super().__getitem__(self.formatKey(key)))
+
+	def get(self, key, default = None):
+		"""Overridden to account for key formatting."""
+
+		return self.formatValue(super().get(self.formatKey(key), default))
+
+	def _yieldInterpreted(self, text):
+		"""Yields pieces of 'text' that are put through the interpreter.
+
+		Example Input: _yieldInterpreted("Lorem ${ipsum} Dolor ${2:int} Amet")
+		"""
+
+		for pre, key, _type, post in re.findall(self.interpreter, text):
+			if (not key):
+				yield f"{pre}{post}"
+				continue
+
+			if (not _type):
+				yield f"{pre}{self[key]}{post}"
+				continue
+
+			yield f"{pre}{self[self.typeCatalogue.get(_type, str)(key)]}{post}"
+
+	def setInterpreter(self, interpreter = NULL):
+		"""Sets the interpreter for the text.
+		By default, dictionary keys can be flag by a dollar sign and surrounding them with brackets.
+		A colon can be used to declare a callable in 'typeCatalogue' that can return the correct key to use.
+
+		interpreter (compiled regex) - A compiled regex to use for searching for circular references
+			~ Should yield four item tuples for _yieldInterpreted()
+			- If None: Will not allow circular references
+			- If NULL: Will use the default interpreter
+
+		Example Input: setInterpreter()
+		"""
+
+		if (interpreter is not NULL):
+			self.interpreter = interpreter
+			return
+
+		subkey = "[^\:\}}]"
+		key = f"({subkey}+)(?:\:({subkey}+))?"
+		inside_brackets =  f"(?:\$\{{{key}\}})"
+		outside_brackets = "(?:([^(?:\$\{)]+))"
+		self.interpreter = re.compile(f"{outside_brackets}*{inside_brackets}*{outside_brackets}*")
+
+	def formatValue(self, value = None):
+		"""Formats the value using the interpreter.
+
+		Example Input: formatValue()
+		"""
+
+		if (self.interpreter is None):
+			return value
+		if (not isinstance(value, str)):
+			return value
+		if ("${" not in value):
+			return value
+
+		return ''.join(self._yieldInterpreted(value))
+
+	def setSensitivity(self, caseSensitive = NULL, typeSensitive = NULL):
+		"""Changes if keys are sensitive to case or type.
+		Note: This cannot be changed after items are added.
+
+		caseSensitive (bool) - Determines if string case matters for strings
+			- If True: "a" != "A"
+			- If False: "a" == "A"
+
+		typeSensitive (bool) - Determines if variable type matters
+			- If True: "1" != 1
+			- If False: "1" == 1
+
+		Example Input: setSensitivity()
+		"""
+
+		if (self):
+			errorMessage = "Sensitivity must be set before items are added"
+			raise SyntaxError(errorMessage)
+
+		if (caseSensitive is not NULL):
+			self.caseSensitive = caseSensitive
+
+		if (typeSensitive is not NULL):
+			self.typeSensitive = typeSensitive
+
+		if (self.caseSensitive):
+			if (self.typeSensitive):
+				self.formatKey = lambda key: key
+			else:
+				self.formatKey = lambda key: f"{key}"
+		else:
+			if (self.typeSensitive):
+				self.formatKey = lambda key: key.casefold() if (isinstance(key, str)) else key
+			else:
+				self.formatKey = lambda key: f"{key}".casefold()
+
+	def pop(self, key, default = None):
+		"""Overridden to account for key formatting."""
+
+		return super().pop(self.formatKey(key), default)
+
+	def setdefault(self, key, default = None):
+		"""Overridden to account for key formatting."""
+
+		return super().setdefault(self.formatKey(key), default)
+
+	def update(self, other = None):
+		"""Overridden to account for key formatting."""
+
+		def generator():
+			nonlocal other
+
+			if (isinstance(other, dict)):
+				for key, value in other.items():
+					yield self.formatKey(key), value
+				return
+
+			raise NotImplementedError(type(other))
+
+		###################
+
+		if (other is None):
+			return
+
+		super().update(generator())
 
 #Ensure Functions
 def ensure_set(item, convertNone = False):
