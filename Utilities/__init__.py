@@ -1,13 +1,15 @@
 import lazyLoad
 lazyLoad.load("wx", useCatalogue = False)
 lazyLoad.load(
-	"PIL",
-	"stat",
+	"PIL", 
+	"stat", 
+	"operator", 
 
 	"wx.html", 
 	"wx.lib.wordwrap", 
 ) 
 
+from . import logger
 from . import common
 from . import caching
 from . import wxPython
