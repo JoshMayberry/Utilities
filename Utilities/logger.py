@@ -1,18 +1,17 @@
 import os
 import sys
+import glob
 
 import operator
 import threading
+import traceback
 
 import logging
 import logging.handlers
 
-if (__name__ == "__main__"):
-	import common
-else:
-	from . import common
+import Utilities as MyUtilities
 
-NULL = common.NULL
+NULL = MyUtilities.common.NULL
 
 #Use: https://realpython.com/python-logging/
 #Use: https://docs.python.org/3.6/howto/logging.html#advanced-logging-tutorial
@@ -22,7 +21,7 @@ NULL = common.NULL
 class LabelUsedError(Exception): pass
 class LoggerExistsError(Exception): pass
 
-levelCatalogue = common._dict({
+levelCatalogue = MyUtilities.common._dict({
 	"n": "NOTSET", 		0: "${n}", 	"NOTSET": 	"${n}", 	None: "${n}", 
 	"d": "DEBUG", 		1: "${d}", 	"DEBUG": 	"${d}", 
 	"i": "INFO", 		2: "${i}", 	"INFO": 	"${i}", 
@@ -31,6 +30,51 @@ levelCatalogue = common._dict({
 	"c": "CRITICAL", 	5: "${c}", 	"CRITICAL": "${c}", 
 }, caseSensitive = False, typeSensitive = False)
 
+#Monkey Patches
+def _mp_FileHandler__open(self):
+	"""Overridden to ensure file directory exists.
+	Modified code from unutbu on: https://stackoverflow.com/questions/20666764/python-logging-how-to-ensure-logfile-directory-is-created/20667049#20667049
+	"""
+
+	os.makedirs(os.path.dirname(self.baseFilename), exist_ok = True)
+	return old_FileHandler__open(self)
+
+old_FileHandler__open = logging.FileHandler._open
+logging.FileHandler._open = _mp_FileHandler__open
+
+if (__name__ == "__main__"):
+	_srcfile = logging._srcfile
+else:
+	_srcfile = os.path.normcase(_mp_FileHandler__open.__code__.co_filename)
+
+def currentframe():
+	"""Overridden to ignore this module too."""
+	global _srcfile
+
+	frame = sys._getframe(1)
+	exclude = (logging._srcfile, _srcfile)
+	while hasattr(frame, "f_code"):
+		if (os.path.normcase(frame.f_code.co_filename) not in exclude):
+			return frame
+		frame = frame.f_back
+	return frame
+
+def _mp_Logger_findCaller(self, stack_info = False):
+	"""Overridden to ignore this module too."""
+
+	frame = currentframe()
+	code = frame.f_code
+
+	if (stack_info):
+		sinfo = f"Stack (most recent call last):\n{''.join(traceback.format_list(traceback.extract_stack(frame)))}".rstrip("\n")
+	else:
+		sinfo = None
+	
+	return code.co_filename, frame.f_lineno, code.co_name, sinfo
+
+logging.Logger.findCaller = _mp_Logger_findCaller
+
+#Logger Functions
 loggerLock = threading.RLock()
 loggerCatalogue = {}
 def getLogger(label = None, *, config = None):
@@ -66,7 +110,7 @@ class Logger():
 		self._setLogger(label)
 		self._setConfig(config)
 
-	@common.makeProperty()
+	@MyUtilities.common.makeProperty()
 	class label():
 		def setter(self, value):
 			global loggerCatalogue
@@ -243,8 +287,8 @@ class Logger():
 		Example Input: addFile("temp.log")
 		"""
 
-		mode = common.ensure_default(mode, default = "a")
-		name = common.ensure_default(name, default = lambda: os.path.join(os.getcwd(), "temp.log"))
+		mode = MyUtilities.common.ensure_default(mode, default = "a")
+		name = MyUtilities.common.ensure_default(name, default = lambda: os.path.join(os.getcwd(), "temp.log"))
 
 		if (maximum is not None):
 			handler = logging.handlers.RotatingFileHandler(name, mode = mode, maxBytes = maximum, backupCount = historyCount, encoding = encoding, delay = delay)
@@ -293,8 +337,8 @@ class Logger():
 		
 		raise NotImplementedError()
 
-		server = common.ensure_default(server, default = "smtp.gmail.com")
-		port = common.ensure_default(port, default = 587)
+		server = MyUtilities.common.ensure_default(server, default = "smtp.gmail.com")
+		port = MyUtilities.common.ensure_default(port, default = 587)
 
 		handler = logging.handlers.SMTPHandler((server, port), address_from, address_to, subject, credentials = (address_from, password), timeout = timeout)
 		configureHandler(handler, **kwargs)
@@ -351,7 +395,7 @@ class Logger():
 		handler = logging.NullHandler
 		self.thing.addHandler(handler)
 
-	_addHandler_functionCatalogue = common._dict({
+	_addHandler_functionCatalogue = MyUtilities.common._dict({
 		"null": addNull, None: "${null}", 
 		"temp": addTemp, 
 		"file": addFile, 
@@ -381,19 +425,84 @@ class Logger():
 			self.thing.removeHandler(handler)
 
 	def debug(self, message, includeTraceback = False, **kwargs):
+		"""Logs a message with the severity level 'debug'.
+
+		Example Input: debug("lorem ipsum")
+		"""
+
 		self.thing.debug(formatMessage(message, **kwargs), exc_info = includeTraceback)
 
 	def info(self, message, includeTraceback = False, **kwargs):
+		"""Logs a messagewith the severity level 'info'.
+
+		Example Input: info("lorem ipsum")
+		"""
+
 		self.thing.info(formatMessage(message, **kwargs), exc_info = includeTraceback)
 
 	def warning(self, message, includeTraceback = False, **kwargs):
+		"""Logs a message aswith the severity level 'warning'.
+
+		Example Input: warning("lorem ipsum")
+		"""
+
 		self.thing.warning(formatMessage(message, **kwargs), exc_info = includeTraceback)
 
 	def error(self, message, includeTraceback = False, **kwargs):
+		"""Logs a message with the severity level 'error'.
+
+		Example Input: error("lorem ipsum")
+		"""
+
 		self.thing.error(formatMessage(message, **kwargs), exc_info = includeTraceback)
 
 	def critical(self, message, includeTraceback = False, **kwargs):
+		"""Logs a message as with the severity level 'critical'.
+
+		Example Input: critical("lorem ipsum")
+		"""
+
 		self.thing.critical(formatMessage(message, **kwargs), exc_info = includeTraceback)
+
+	def yieldLogs(self, returnExisting = True, returnHistory = True):
+		"""Yields where logs are being stored.
+
+		returnExisting (bool) - Determines if only existing filesnames are returned
+			- If False: The filenames are what the currentlog file would be called
+			- If True: The filenames are actually on the system
+
+		returnHistory (bool) - Determines if history log files should also be returned
+
+		Example Input: yieldLogs()
+		Example Input: yieldLogs(returnExisting = False)
+		"""
+
+		def yieldFile(fileName):
+			if (returnHistory):
+				fileList = glob.iglob(f"{fileName}*")
+			else:
+				fileList = (fileName,)
+
+			for item in fileList:
+				if ((not returnExisting) or (os.path.exists(fileName))):
+					yield item
+
+		########################################################
+
+		for handler in self.thing.handlers:
+			if (not isinstance(handler, logging.FileHandler)):
+				continue
+
+			for item in yieldFile(handler.baseFilename):
+				yield item
+
+	def getLogs(self, *args, **kwargs):
+		"""A non-generator version of yieldLogs().
+
+		Example Input: getLogs()
+		"""
+
+		return tuple(self.yieldLogs(*args, **kwargs))
 
 def formatMessage(message, **kwargs):
 	"""Adds the kwargs to the end of the message."""
@@ -431,9 +540,9 @@ def configureHandler(handler, *, level = NULL, formatter = NULL, timestamp = NUL
 	Example Input: configureHandler(handler, formatter = "%(name)s - %(levelname)s - %(message)s", formatStyle = "%")
 	"""
 
-	timestamp = common.ensure_default(timestamp, default = None, defaultFlag = NULL)
-	formatStyle = common.ensure_default(formatStyle, default = "{", defaultFlag = NULL)
-	formatter = common.ensure_default(formatter, default = logging._STYLES[formatStyle][1], defaultFlag = NULL)
+	timestamp = MyUtilities.common.ensure_default(timestamp, default = None, defaultFlag = NULL)
+	formatStyle = MyUtilities.common.ensure_default(formatStyle, default = "{", defaultFlag = NULL)
+	formatter = MyUtilities.common.ensure_default(formatter, default = logging._STYLES[formatStyle][1], defaultFlag = NULL)
 	
 	handler.setFormatter(logging.Formatter(formatter, datefmt = timestamp, style = formatStyle))
 
@@ -543,7 +652,7 @@ class Filter_Level(logging.Filter):
 		"""
 		self.parent = parent
 		self.level = level
-		self.comparer = common.ensure_default(comparer, default = operator.is_, consumeFunction = False)
+		self.comparer = MyUtilities.common.ensure_default(comparer, default = operator.is_, consumeFunction = False)
 
 	def filter(self, record):
 		if (self.level is None):
@@ -575,7 +684,11 @@ class LoggingFunctions():
 	def log_critical(self, *args, **kwargs):
 		self._logger.critical(*args, **kwargs)
 
+	def log_getLogs(self, *args, **kwargs):
+		return self._logger.getLogs(*args, **kwargs)
+
 if (__name__ == "__main__"):
+	quietRoot()
 	if (False):
 		logger = getLogger()
 		logger.setLevel(1)
@@ -590,11 +703,25 @@ if (__name__ == "__main__"):
 				"level": 1,
 				"filter_nonLevel": True,
 			},
+			"disk": {
+				"type": "file", 
+				"delay": True, 
+				"maximum": 20_000, 
+				"name": os.path.join(os.getcwd(), "logs", os.environ.get('username'), "info.log"), 
+
+				"level": "info", 
+				"historyCount": 2, 
+				"filter_nonLevel": True, 
+			},
 		}
 		logger = getLogger(config = config)
 
-	logger.debug("Lorem")
-	logger.info("Ipsum")
-	logger.warning("Dolor")
-	logger.error("Sit")
-	logger.critical("Amet")
+		print(logger.thing)
+
+	# logger.debug("Lorem")
+	# logger.info("Ipsum")
+	# logger.warning("Dolor")
+	# logger.error("Sit")
+	# logger.critical("Amet")
+
+	print(logger.getLogs())

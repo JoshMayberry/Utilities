@@ -63,11 +63,14 @@ _loadCatalogue = {
 	),
 
 	"Utilities": (
+		"Utilities.logger", 
 		"Utilities.common", 
+		"Utilities.caching", 
 		"Utilities.wxPython", 
 		"Utilities.debugging", 
 		"Utilities.subProcess", 
-		"Utilities.multiProcess",
+		"Utilities.multiProcess", 
+		"Utilities.threadManager", 
 	),
 
 	# "forks": (

@@ -15,13 +15,35 @@ class Singleton():
 	Example Use: FLAG = MyUtilities.common.Singleton("FLAG")
 	"""
 
-	def __init__(self, label = "Singleton"):
-		self.label = label
+	def __init__(self, label = "Singleton", *, state = None, private = False):
+		"""
+		label (str) - What this singleton is called
+		private (bool) - Determines if only this module may use this singleton (NotImplemented)
+
+		state (bool) - Determiens what happens if this singleton is evaluated by bool()
+			- If True: Will always return True
+			- If False: Will always return False
+			- If None: No special action is taken
+		"""
+
+		self.private = private
+
+		if (not self.private):
+			self.label = label
+		else:
+			self.label = f"{label} ({__name__} only)"
+
+		if (state is not None):
+			if (state):
+				self.__bool__ = lambda self: True
+			else:
+				self.__bool__ = lambda self: False
 
 	def __repr__(self):
 		return f"{self.label}()"
 
-NULL = Singleton("NULL")
+NULL = Singleton("NULL", state = False)
+NULL_private = Singleton("NULL", state = False, private = True)
 
 class ELEMENT():
 	"""Used to make a class pass ensure_container() as an element instead of a container."""
@@ -397,7 +419,7 @@ def ensure_list(item, convertNone = False):
 	if (convertNone):
 		return []
 
-def ensure_container(item, *, convertNone = True, returnForNone = None, 
+def ensure_container(item, *, useForNone = None, convertNone = True, returnForNone = None, 
 	evaluateGenerator = True, elementTypes = None, elementCriteria = None):
 	"""Makes sure the given item is a container.
 
@@ -418,7 +440,7 @@ def ensure_container(item, *, convertNone = True, returnForNone = None,
 	Example Input: ensure_container((255, 255, 0), elementCriteria = ((3, int), (4, int)))
 	"""
 
-	if (item is None):
+	if (item is useForNone):
 		if (convertNone):
 			return ()
 		if (callable(returnForNone)):
@@ -445,7 +467,7 @@ def ensure_container(item, *, convertNone = True, returnForNone = None,
 		return item
 	return item
 
-def ensure_dict(catalogue, default = None, *, useAsKey = True):
+def ensure_dict(catalogue, default = None, *, useForNone = None, useAsKey = True, convertNone = True):
 	"""Makes sure the given catalogue is a dictionary.
 
 	useAsKey (bool) - Determines how 'catalogue' is used if it is not a dictionary
@@ -456,8 +478,12 @@ def ensure_dict(catalogue, default = None, *, useAsKey = True):
 	Example Input: ensure_dict(relation, attribute)
 	"""
 
-	if (isinstance(catalogue, dict)):
+	if (catalogue is useForNone):
+		if (convertNone):
+			return {}
+	elif (isinstance(catalogue, dict)):
 		return catalogue
+
 	if (useAsKey is None):
 		return {catalogue: catalogue}
 	if (useAsKey):
@@ -494,10 +520,11 @@ def ensure_default(value, default = None, *, consumeFunction = True, defaultFlag
 		return default
 	return value
 
-def ensure_string(value, *, returnForNone = ""):
+def ensure_string(value, *, returnForNone = "", extend = None):
 	"""Returns 'value' as a string.
 
 	returnForNone (str) - What to return if 'value' is None
+	extend (str) - What to replace all instances of '{}' in 'value' with
 
 	Example Input: ensure_string(value)
 	Example Input: ensure_string(value, returnForNone = "Empty")
@@ -505,7 +532,106 @@ def ensure_string(value, *, returnForNone = ""):
 
 	if (value is None):
 		return returnForNone
-	return f"{value}"
+
+	if (extend is None):
+		return f"{value}"
+
+	return f"{value}".format(extend)
+	
+def ensure_functionInput(myFunction = None, *args, myFunctionArgs = None, myFunctionKwargs = None, 
+	includeSelf = False, selfObject = None, includeEvent = False, event = None, **kwargs):
+	"""Makes sure that 'myFunctionArgs' and 'myFunctionKwargs' are able to be passed into 'myFunction' correctly.
+	Yields the following for each function to run: (myFunction, myFunctionArgs, myFunctionKwargs).
+
+	myFunction (function) - What function to run
+		- If list: Will run each function in the order given
+
+	myFunctionArgs (list) - What args to use for 'myFunction', along with *args
+		~ If 'myFunction' is a list, this must be a list of equal length
+
+	myFunctionKwargs (list) - What kwargs to use for 'myFunction', along with **kwargs
+		~ If 'myFunction' is a list, this must be a list of equal length
+
+	args (*) - What args to give each function should run (before 'myFunctionArgs')
+	kwargs (**) - What default kwargs to give each function should run (applied before 'myFunctionKwargs')
+
+	includeSelf (bool) - Determines if 'self' is tacked on to the start of 'args' (before 'event')
+	self (object) - Used to emulate class functions, or to pass in 'self' as a parent variable
+
+	includeEvent (bool) - Determines if 'event' is tacked on to the start of 'args'
+	event (wxEvent) - An event variable to start the function with
+
+	Example Input: ensure_functionInput(lorem, myFunctionArgs = 1)
+	Example Input: ensure_functionInput(lorem, myFunctionArgs = (1, 2))
+
+	Example Input: ensure_functionInput(lorem, myFunctionArgs = (1, 2), myFunctionKwargs = {"x": 3})
+	Example Input: ensure_functionInput(lorem, 1, 2, x = 3)
+
+	Example Input: ensure_functionInput([lorem, ipsum], myFunctionArgs = (1, 2))
+	"""
+
+	def yieldArgs(n):
+		def yieldCombined(argList):
+			nonlocal includeSelf, selfObject, includeEvent, event, args
+
+			if (includeSelf):
+				yield selfObject
+
+			if (includeEvent):
+				yield event
+
+			for item in args:
+				yield item
+
+			for item in argList:
+				yield item
+
+		def yieldFormatted():
+			nonlocal myFunctionArgs
+
+			argsList = ensure_container(myFunctionArgs)
+
+			if (n is 1):
+				yield argsList
+
+			if (len(argsList) != n):
+				errorMessage = f"A list of length {n} is required for myFunctionArgs, but it has a length of {len(argsList)}"
+				raise SyntaxError(errorMessage)
+
+			for item in argsList:
+				yield item
+
+		#########################################
+
+		for item in yieldFormatted():
+			yield tuple(yieldCombined(item))
+
+	def yieldKwargs(n):
+		nonlocal myFunctionKwargs
+
+		kwargsList = ensure_container({**kwargs, **ensure_dict(myFunctionKwargs)})
+
+		if (not kwargsList):
+			for i in range(n):
+				yield {}
+			return
+
+		if (len(kwargsList) != n):
+			errorMessage = f"A list of length {n} is required for myFunctionKwargs, but it has a length of {len(kwargsList)}"
+			raise SyntaxError(errorMessage)
+
+		for item in kwargsList:
+			yield item
+
+	####################################
+
+	functionList = ensure_container(myFunction)
+	if (not functionList):
+		return
+
+	n = len(functionList)
+	for item in zip(functionList, yieldArgs(n), yieldKwargs(n)):
+		yield item
 
 class EnsureFunctions():
 	@classmethod
@@ -531,6 +657,10 @@ class EnsureFunctions():
 	@classmethod
 	def ensure_string(cls, *args, **kwargs):
 		return ensure_string(*args, **kwargs)
+
+	@classmethod
+	def ensure_functionInput(cls, *args, selfObject = None, **kwargs):
+		return ensure_functionInput(*args, selfObject = ensureDefault(selfObject, default = cls), **kwargs)
 
 #Etc
 def nestedUpdate(target, catalogue, *, preserveNone = True):
@@ -818,6 +948,59 @@ def removeDir(filePath):
 
 	shutil.rmtree(filePath, ignore_errors = False, onerror = onerror)
 
+def runMyFunction(myFunction = None, *args, includeError = False, forceTuple = False, 
+	errorFunction = None, errorFunctionArgs = None, errorFunctionKwargs = None, **kwargs):
+	"""Runs a function.
+
+	args (*) - Given to ensure_functionInput()
+	kwargs (**) - Given to ensure_functionInput()
+
+	errorFunction (function) - A function to run if an error occurs while running 'myFunction'
+	errorFunctionArgs (list) - args for 'errorFunction'
+	errorFunctionKwargs (list) - kwargs for 'errorFunction'
+
+	Example Input: runMyFunction(lorem)
+	"""
+
+	def handleError(error):
+		nonlocal errorFunction, errorFunctionArgs, errorFunctionKwargs
+
+		if (errorFunction is None):
+			raise error
+
+		if (includeError):
+			extendedArgs = (error, *args)
+		else:
+			extendedArgs = args
+
+		for answer in runMyFunction(myFunction = errorFunction, *extendedArgs, myFunctionArgs = errorFunctionArgs, myFunctionKwargs = errorFunctionKwargs, forceTuple = True, **kwargs):
+			yield answer
+
+	def getAnswer(function, functionArgs, functionKwargs):
+		nonlocal forceTuple
+
+		try:
+			return function(*functionArgs, **functionKwargs)
+
+		except Exception as error:
+			answer = tuple(handleError(error))
+			if (forceTuple or (len(answer) is not 1)):
+				return answer
+			else:
+				return next(iter(answer), None)
+
+	#########################################################
+
+	#Skip empty functions
+	if (myFunction is None):
+		return
+
+	answer = tuple(getAnswer(*item) for item in ensure_functionInput(myFunction, *args, **kwargs))
+	if (forceTuple or (len(answer) is not 1)):
+		return answer
+	else:
+		return next(iter(answer), None)
+		
 class CommonFunctions():
 	@classmethod
 	def nestedUpdate(cls, *args, **kwargs):
@@ -850,6 +1033,10 @@ class CommonFunctions():
 	@classmethod
 	def removeDir(cls, *args, **kwargs):
 		return removeDir(*args, **kwargs)
+
+	@classmethod
+	def runMyFunction(cls, *args, selfObject = None, **kwargs):
+		return runMyFunction(*args, selfObject = ensureDefault(selfObject, default = cls), **kwargs)
 	
 #Decorators
 def setDocstring(docstring):
@@ -877,10 +1064,16 @@ def setDocstring(docstring):
 		return function
 	return decorator
 
-def makeProperty(*, publisher = None, subscription = None):
+def makeProperty(default = NULL_private, variableName = "_{}", *, publisher = None, subscription = None):
 	"""Turns the decorated class into a property.
 	Uses the docstring of the class for the docstring of the property.
 	Uses the functions getter, setter, and remover to create the property.
+
+	default (any) - What to use if the getter is called before the setter is used
+		- If NULL_private: Will not attempt to create a default
+
+	variableName (str) - What naming convention to use for the getter variable
+		~ The class name will be placed in all instances of "{}"
 
 	publisher (module) - The pubsub module to use for 'subscription'
 		- If None: 'subscription' will not be used
@@ -904,13 +1097,14 @@ def makeProperty(*, publisher = None, subscription = None):
 				def remover(self):
 					del self.ipsum
 
-	Use Variation:
-		@makeProperty(publisher = pubsub.pub)
-		class lorem(classHandle = None):
+	_________________________________________
 
-	Use Variation:
-		@makeProperty(publisher = pubsub.pub, subscription = "dolor")
-		class lorem(classHandle = None):
+	Example Input: makeProperty(publisher = pubsub.pub)
+	Example Input: makeProperty(publisher = pubsub.pub, subscription = "dolor")
+
+	Example Input: makeProperty(default = None)
+	Example Input: makeProperty(default = None, variableName = "ipsum")
+	Example Input: makeProperty(default = None, variableName = "{}_ipsum")
 	"""
 
 	def decorator(cls):
@@ -918,9 +1112,26 @@ def makeProperty(*, publisher = None, subscription = None):
 		if (publisher is not None):
 			publisher.subscribe(setter, subscription or cls.__name__)
 
+		if (default is NULL_private):
+			getter = getattr(cls, "getter", None)
+		else:
+			_variable = variableName.format(cls.__name__)
+			_getter = getattr(cls, "getter", None)
+
+			if (_getter is None):
+				_getter = lambda self: getattr(self, _variable)
+			if (setter is None):
+				setter = lambda self, value: setattr(self, _variable, value)
+
+			def getter(self):
+				if (not hasattr(self, _variable)):
+					setter(self, default)
+
+				return _getter(self)
+
 		return property(
 			fset = setter, 
-			fget = getattr(cls, "getter", None), 
+			fget = getter, 
 			fdel = getattr(cls, "remover", None), 
 			doc = cls.__doc__ or None)
 
@@ -1020,3 +1231,401 @@ def lazyProperty(variable = None, *, default = NULL, defaultVariable = None, rea
 
 		return property(fget = getter_runOnce, fset = setter, fdel = remover, doc = function.__doc__)
 	return decorator
+
+#Etc Functions
+def getClosest(myList, number, returnLower = True, autoSort = False):
+	"""Returns the closest number in 'myList' to 'number'
+	Modified Code from: Lauritz V. Thaulow on https://stackoverflow.com/questions/12141150/from-list-of-integers-get-number-closest-to-a-given-value
+
+	myList (list) - The list to look through
+	number (int)  - The number to search with
+	returnLower (bool) - Determines what happens if 'number' is equadistant from the left and right bound.
+		- If True: Returns the left bound
+		- If False: Returns the right bound
+	autoSort (bool) - Determines if the list should be sorted before checking
+		- If True: Ensures the list is sorted
+		- If False: Assumes the list is sorted already
+
+	Example Input: getClosest([7, 15, 25, 30], 20))
+	"""
+
+	if (autoSort):
+		myList = sorted(myList)
+
+	position = bisect.bisect_left(myList, number)
+	if (position == 0):
+		answer = myList[0]
+
+	elif (position == len(myList)):
+		answer = myList[-1]
+
+	else:
+		before = myList[position - 1]
+		after = myList[position]
+
+		if (after - number < number - before):
+			answer = after
+		elif (returnLower):
+			answer = before
+		else:
+			answer = after
+
+	return answer
+
+def getNumber(itemList = None, depthMax = None, _currentDepth = 1):
+	"""Returns the number of items in 'itemList'.
+	Special thanks to stonesam92 for how to check nested items on https://stackoverflow.com/questions/27761463/how-can-i-get-the-total-number-of-elements-in-my-arbitrarily-nested-list-of-list
+
+	itemList (any) - What to check the number of
+	_currentDepth (int) - How many recursions have been done on this branch
+	depthMax (int) - The max number of recursions to do
+		- If None: Will not limit the number of recursions
+
+	Example Input:: getNumber()
+	Example Input:: getNumber([1, 2, 3])
+	Example Input:: getNumber({1: 2, 3: {4: 5}})
+	"""
+
+	if ((depthMax is not None) and (_currentDepth > depthMax)):
+		return 0
+	elif (isinstance(itemList, str)):
+		return 1
+	elif (isinstance(itemList, dict)):
+		count = 0
+		for key, value in itemList.items():
+			count += 1 + getNumber(value, depthMax = depthMax, _currentDepth = _currentDepth + 1)
+		return count
+	elif (isinstance(itemList, (list, tuple, range)) or hasattr(itemList, '__iter__')):
+		return sum(getNumber(item, depthMax = depthMax, _currentDepth = _currentDepth + 1) for item in itemList)
+	else:
+		return 1
+
+def extendString(source, variable, preMessage = "-- {}: ", postMessage = "\n", *, useForNone = None, useRepr = False, useId = False):
+	"""Returns a string that can be used to extend an existing string.
+	Will return an empty string if the value of 'variable' for 'source' is 'useForNone'.
+
+	preMessage (str) - What to put before the value of 'variable'
+		~ All instances of '{}' will be replaced by a title version of 'variable'
+
+	Example Input: extendString(self, "parent")
+	Example Input: extendString(self, "parent", "~ {}: ")
+	Example Input: extendString(self, "parent", "-- Source: ")
+	Example Input: extendString(self, "parent", useRepr = True)
+	Example Input: extendString(self, "parent", useId = True)
+	Example Input: extendString(self, "label", preMessage = ", {} = ", postMessage = None)
+	"""
+
+	value = getattr(source, variable, useForNone)
+	if (value is useForNone):
+		return ""
+
+	if (useRepr):
+		value = value.__repr__()
+	elif (useId):
+		value = id(value)
+
+	return f"{ensure_string(preMessage, extend = variable.title())}{value}{ensure_string(postMessage)}"
+		
+class EtcFunctions():
+	"""An assortment of etc functions."""
+
+	@classmethod
+	def getClosest(cls, *args, **kwargs):
+		return getClosest(*args, **kwargs)
+
+	@classmethod
+	def getNumber(cls, *args, **kwargs):
+		return getNumber(*args, **kwargs)
+
+	@classmethod
+	def extendString(cls, *args, **kwargs):
+		return extendString(cls, *args, **kwargs)
+
+def _get(itemCatalogue, itemLabel = None, returnExists = False, exclude = None):
+	"""Searches the label catalogue for the requested object.
+
+	itemLabel (any) - What the object is labled as in the catalogue
+		- If slice: objects will be returned from between the given spots 
+		- If None: Will return all that would be in an unbound slice
+
+	Example Input: _get(self.rowCatalogue)
+	Example Input: _get(self.rowCatalogue, 0)
+	Example Input: _get(self.rowCatalogue, slice(None, None, None))
+	Example Input: _get(self.rowCatalogue, slice(2, 7, None))
+	"""
+
+	if (exclude is None):
+		exclude = []
+	elif (not isinstance(exclude, (list, tuple, set, range, types.GeneratorType))):
+		exclude = [exclude]
+
+	#Account for retrieving all nested
+	if (itemLabel is None):
+		itemLabel = slice(None, None, None)
+
+	#Account for indexing
+	if (isinstance(itemLabel, slice)):
+		if (itemLabel.step is not None):
+			raise NotImplementedError()
+		
+		elif ((itemLabel.start is not None) and (itemLabel.start not in itemCatalogue)):
+			errorMessage = f"There is no item labled {itemLabel.start} in the given catalogue"
+			raise KeyError(errorMessage)
+		
+		elif ((itemLabel.stop is not None) and (itemLabel.stop not in itemCatalogue)):
+			errorMessage = f"There is no item labled {itemLabel.stop} in the given catalogue"
+			raise KeyError(errorMessage)
+
+		handleList = []
+		begin = False
+		for item in sorted(itemCatalogue.keys(), key = lambda item: f"{item}"):
+			#Allow for slicing with non-integers
+			if ((not begin) and ((itemLabel.start is None) or (itemCatalogue[item].label == itemLabel.start))):
+				begin = True
+			elif ((itemLabel.stop is not None) and (itemCatalogue[item].label == itemLabel.stop)):
+				break
+
+			#Slice catalogue via creation date
+			if (begin and (item not in exclude)):
+				handleList.append(itemCatalogue[item])
+		return handleList
+
+	elif (itemLabel not in itemCatalogue):
+		answer = None
+	else:
+		answer = itemCatalogue[itemLabel]
+
+	if (returnExists):
+		return answer is not None
+
+	if (answer is not None):
+		if (isinstance(answer, (list, tuple, range))):
+			if (len(answer) == 1):
+				answer = answer[0]
+		return answer
+
+	errorMessage = f"There is no item labled {itemLabel} in the given catalogue"
+	raise KeyError(errorMessage)
+
+class Container():
+	def __init__(self, dataCatalogue = None, label_variable = None, replaceMethods = False, **kwargs):
+		self._dataCatalogue = ensure_dict(dataCatalogue)
+		self._label_variable = ensure_string(label_variable, returnForNone = "label")
+
+		if (replaceMethods):
+			self.__len__ = self._dataCatalogue.__len__
+			self.__iter__ = self._dataCatalogue.__iter__
+			self.__exit__ = self._dataCatalogue.__exit__
+			self.__enter__ = self._dataCatalogue.__enter__
+			self.__getitem__ = self._dataCatalogue.__getitem__
+			self.__setitem__ = self._dataCatalogue.__setitem__
+			self.__delitem__ = self._dataCatalogue.__delitem__
+			self.__contains__ = self._dataCatalogue.__contains__
+
+	def __repr__(self):
+		representation = f"{self.__class__.__name__}(id = {id(self)}"
+		representation += extendString(self, self._label_variable, preMessage = ", {} = ", postMessage = None)
+		representation += ")"
+		return representation
+
+	def __str__(self):
+		output = f"{self.__class__.__name__}()\n-- id: {id(self)}\n"
+		output += extendString(self, self._label_variable)
+		output += extendString(self, "parent", useRepr = True)
+		output += extendString(self, "root", useRepr = True)
+		return output
+
+	def __len__(self):
+		return len(self[:])
+
+	def __contains__(self, key):
+		return _get(self._dataCatalogue, key, returnExists = True)
+
+	def __iter__(self):
+		return _Iterator(self._dataCatalogue)
+
+	def __getitem__(self, key):
+		return _get(self._dataCatalogue, key)
+
+	def __setitem__(self, key, value):
+		self._dataCatalogue[key] = value
+
+	def __delitem__(self, key):
+		del self._dataCatalogue[key]
+
+	def __enter__(self):
+		return self
+
+	def __exit__(self, exc_type, exc_value, traceback):
+		if (traceback is not None):
+			return False
+
+	def keys(self, *args, **kwargs):
+		return self._dataCatalogue.keys(*args, **kwargs)
+
+	def values(self, *args, **kwargs):
+		return self._dataCatalogue.values(*args, **kwargs)
+
+	def items(self, *args, **kwargs):
+		return self._dataCatalogue.items(*args, **kwargs)
+
+	def getValue(self, variable, order = True, includeMissing = True, exclude = [], sortNone = False, reverse = False, getFunction = None):
+		"""Returns a list of all values for the requested variable.
+		Special thanks to Andrew Clark for how to sort None on https://stackoverflow.com/questions/18411560/python-sort-list-with-none-at-the-end
+
+		variable (str) - what variable to retrieve from all rows
+		order (str) - By what variable to order the items
+			- If variable does not exist: Will place the item at the end of the list with sort() amongst themselves
+			- If True: Will use the python list function sort()
+			- If False: Will not sort returned items
+			- If None: Will not sort returned items
+		sortNone (bool) - Determines how None is sorted
+			- If True: Will place None at the beginning of the list
+			- If False: Will place None at the end of the list
+			- If None: Will remove all instances of None from the list
+
+		Example Input: getValue("naed")
+		Example Input: getValue(self.easyPrint_selectBy)
+		Example Input: getValue("naed", "defaultOrder")
+		Example Input: getValue("barcode", sortNone = None)
+		"""
+
+		if (not isinstance(exclude, (list, tuple, range))):
+			exclude = [exclude]
+		if (getFunction is None):
+			getFunction = getattr
+
+		if ((order is not None) and (not isinstance(order, bool))):
+			data = [getFunction(item, variable) for item in self.getOrder(order, includeMissing = includeMissing, 
+				getFunction = getFunction, sortNone = sortNone, exclude = exclude) if (item not in exclude)]
+		else:
+			data = [getFunction(item, variable) for item in self if (item not in exclude)]
+
+			if ((order is not None) and (isinstance(order, bool)) and order):
+				data = sorted(filter(lambda item: True if (sortNone is not None) else (item is not None), data), 
+					key = lambda item: (((item is None)     if (reverse) else (item is not None)) if (sortNone) else
+										((item is not None) if (reverse) else (item is None)), item), 
+					reverse = reverse)
+
+		return data
+
+	def getOrder(self, variable, includeMissing = True, where = None, exclude = [], sortNone = False, reverse = False, 
+		getFunction = None, compareFunction = None):
+		"""Returns a list of children in order according to the variable given.
+		Special thanks to Andrew Dalke for how to sort objects by attributes on https://wiki.python.org/moin/HowTo/Sorting#Key_Functions
+
+		variable (str) - what variable to use for sorting
+			- If None: Will not sort it
+		includeMissing (bool) - Determiens what to do with children who do not have the requested variable
+		getFunction (function) - What function to run to get the value of this variable where the args are [handle, variable]
+			- If None: will use getattr
+		exclude (list) - What handles should not be included
+			- If function: Determine if the handle should be excluded where the args are [handle]
+
+		Example Input: getOrder("order")
+		Example Input: getOrder("order", includeMissing = False, sortNone = None)
+		Example Input: getOrder("order", getFunction = lambda item, variable: getattr(item, variable.name))
+		Example Input: getOrder("order", where = {"inventoryTitle": None}, compareFunction = lambda item, where: all(item.getAttribute(variable) != value for variable, value in where.items()))
+		Example Input: getOrder("order", exclude = lambda handle: not handle.removePending)
+		"""
+
+		if (not callable(exclude)):
+			if (not isinstance(exclude, (list, tuple, range, types.GeneratorType))):
+				exclude = [exclude]
+			excludeFunction = lambda handle: handle in exclude
+		else:
+			excludeFunction = exclude
+		if (getFunction is None):
+			getFunction = getattr
+
+		if (variable is None):
+			handleList = self.getHandle(where = where, exclude = excludeFunction, getFunction = getFunction, compareFunction = compareFunction)
+		else:
+			try:
+				handleList = sorted(filter(lambda item: hasattr(item, variable) and (not excludeFunction(item)) and ((sortNone is not None) or (getFunction(item, variable) is not None)), 
+					self.getHandle(where = where, exclude = excludeFunction, getFunction = getFunction, compareFunction = compareFunction)), 
+					key = lambda item: (((getFunction(item, variable) is None)     if (reverse) else (getFunction(item, variable) is not None)) if (sortNone) else
+										((getFunction(item, variable) is not None) if (reverse) else (getFunction(item, variable) is None)), getFunction(item, variable)), 
+					reverse = reverse)
+			except TypeError as error:
+				for item in filter(lambda item: hasattr(item, variable) and (not excludeFunction(item)) and ((sortNone is not None) or (getFunction(item, variable) is not None)), 
+					self.getHandle(where = where, exclude = excludeFunction, getFunction = getFunction, compareFunction = compareFunction)):
+
+					print(getFunction(item, variable), item)
+				raise error
+
+			if (includeMissing):
+				handleList.extend([item for item in self if (not hasattr(item, variable) and (not excludeFunction(item)))])
+
+		return handleList
+
+	def getHandle(self, where = None, exclude = [], getFunction = None, compareFunction = None, compareAsStrings = False):
+		"""Returns a list of children whose variables are equal to what is given.
+
+		where (dict) - {variable (str): value (any)}
+			- If None, will not check the values given
+		exclude (list) - What handles should not be included
+			- If function: Determine if the handle should be excluded where the args are [handle]
+		getFunction (function) - What function to run to get the value of this variable where the args are [handle, variable]
+			- If None: will use getattr
+		compareFunction (function) - What function to run to evaluate 'where' where the args are [handle, where]
+			- If None: will use getattr
+
+		Example Input: getHandle()
+		Example Input: getHandle({"order": 4})
+		Example Input: getHandle(exclude = ["main"])
+		Example Input: getHandle(exclude = lambda handle: not handle.removePending)
+		"""
+
+		if (not callable(exclude)):
+			if (not isinstance(exclude, (list, tuple, range, set, types.GeneratorType))):
+				exclude = [exclude]
+			excludeFunction = lambda handle: handle in exclude
+		else:
+			excludeFunction = exclude
+		if (getFunction is None):
+			getFunction = getattr
+		if (compareFunction is None):
+			if (compareAsStrings):
+				compareFunction = lambda handle, where: all(hasattr(handle, variable) and (f"{getFunction(handle, variable)}" == f"{value}") for variable, value in where.items())
+			else:
+				compareFunction = lambda handle, where: all(hasattr(handle, variable) and (getFunction(handle, variable) == value) for variable, value in where.items())
+
+		handleList = []
+		for handle in self:
+			if (not excludeFunction(handle)):
+				if ((where is None) or (len(where) == 0)):
+					handleList.append(handle)
+				elif (compareFunction(handle, where)):
+					handleList.append(handle)
+
+		return handleList
+
+	def getUnique(self, base = "{}", increment = 1, start = 1, exclude = []):
+		"""Returns a unique name with the given criteria.
+
+		Example Input: getUnique()
+		Example Input: getUnique("Format_{}")
+		Example Input: getUnique(exclude = [item.database_id for item in self.parent])
+		"""
+		assert increment is not 0
+
+		if (not isinstance(exclude, (list, tuple, range, set, types.GeneratorType))):
+			exclude = [exclude]
+
+		while True:
+			ending = start + increment - 1
+			if ((base.format(ending) in self) or (base.format(ending) in exclude) or (ending in exclude) or (str(ending) in [str(item) for item in exclude])):
+				increment += 1
+			else:
+				break
+		return base.format(ending)
+
+if (__name__ == "__main__"):
+	def test(x):
+		print("@test.1", x)
+		jhkhjkjkh
+		return 2
+
+	print("@__main__", runMyFunction(test, 1))
+
