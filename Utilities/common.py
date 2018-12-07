@@ -1,13 +1,17 @@
 import os
 import sys
 import ast
+import types
 
 import re
 import stat
+import queue
 import shutil
 import typing
-import inspect
 import collections
+
+import inspect
+import traceback
 
 class Singleton():
 	"""Used to get values correctly.
@@ -48,7 +52,45 @@ NULL_private = Singleton("NULL", state = False, private = True)
 class ELEMENT():
 	"""Used to make a class pass ensure_container() as an element instead of a container."""
 
+class CATALOGUE():
+	"""Used to make a class pass ensure_dict() as a dict instead of a dict key or value."""
+
 #Iterators
+class CommonIterator(object):
+	"""Used by handle objects to iterate over their nested objects."""
+
+	def __init__(self, data, filterNone = False):
+		if (not isinstance(data, (list, dict))):
+			data = data[:]
+
+		self.data = data
+
+		if (isinstance(self.data, dict)):
+			self.order = list(self.data.keys())
+
+			if (filterNone):
+				self.order = [key for key in self.data.keys() if key is not None]
+			else:
+				self.order = [key if key is not None else "" for key in self.data.keys()]
+			self.order = sorted(self.order, key = lambda item: f"{item}")
+			self.order = [key if key != "" else None for key in self.order]
+
+	def __iter__(self):
+		return self
+
+	def __next__(self):
+		if (not isinstance(self.data, dict)):
+			if not self.data:
+				raise StopIteration
+
+			return self.data.pop(0)
+		else:
+			if not self.order:
+				raise StopIteration
+
+			key = self.order.pop()
+			return self.data[key]
+
 class CustomIterator():
 	"""Iterates over items in an external list."""
 	def __init__(self, parent, variableName, loop = False, printError = False):
@@ -195,6 +237,27 @@ class CustomIterator():
 			if (self.printError):
 				traceback.print_exception(type(error), error, error.__traceback__)
 			raise error
+
+#Queues
+class PriorityQueue(queue.PriorityQueue):
+	"""A priority queue that keeps item order.
+	Modified code from jcollado on https://stackoverflow.com/questions/9289614/how-to-put-items-into-priority-queues
+	"""
+	
+	def __init__(self, defaultPriority = 100):
+		super().__init__()
+		self.counter = 0
+		self.defaultPriority = defaultPriority
+
+	def put(self, item, priority = None):
+		if (priority is None):
+			priority = self.defaultPriority
+		super().put((priority, self.counter, item))
+		self.counter += 1
+
+	def get(self, *args, **kwargs):
+		return super().get(*args, **kwargs)[2]
+
 
 #Custom Types
 class _set(set):
@@ -467,7 +530,7 @@ def ensure_container(item, *, useForNone = None, convertNone = True, returnForNo
 		return item
 	return item
 
-def ensure_dict(catalogue, default = None, *, useForNone = None, useAsKey = True, convertNone = True):
+def ensure_dict(catalogue, default = None, *, useForNone = None, useAsKey = True, convertContainer = True, convertNone = True):
 	"""Makes sure the given catalogue is a dictionary.
 
 	useAsKey (bool) - Determines how 'catalogue' is used if it is not a dictionary
@@ -481,8 +544,10 @@ def ensure_dict(catalogue, default = None, *, useForNone = None, useAsKey = True
 	if (catalogue is useForNone):
 		if (convertNone):
 			return {}
-	elif (isinstance(catalogue, dict)):
+	elif (isinstance(catalogue, (dict, CATALOGUE))):
 		return catalogue
+	elif (convertContainer and isinstance(catalogue, Container)):
+		return catalogue._dataCatalogue
 
 	if (useAsKey is None):
 		return {catalogue: catalogue}
@@ -1325,6 +1390,63 @@ def extendString(source, variable, preMessage = "-- {}: ", postMessage = "\n", *
 		value = id(value)
 
 	return f"{ensure_string(preMessage, extend = variable.title())}{value}{ensure_string(postMessage)}"
+
+_srcfile = os.path.normcase(ensure_container.__code__.co_filename)
+def getCurrentframe(*, exclude = None):
+	"""Returns the current stack frame.
+	Modified code from: logging.Logger.findCaller
+
+	exclude (str) - What filename to ignore frames from
+		- If list: Will exclude from all given
+
+	Example Input: getCurrentframe()
+	Example Input: getCurrentframe(exclude = __file__)
+	"""
+	global _srcfile
+
+	frame = sys._getframe(1)
+	exclude = (_srcfile, *ensure_container(exclude))
+	while hasattr(frame, "f_code"):
+		if (os.path.normcase(frame.f_code.co_filename) not in exclude):
+			return frame
+		frame = frame.f_back
+	return frame
+
+def getCaller(*, exclude = None, forceTuple = False, 
+	include_fileName = False, include_lineNumber = False, include_traceback = False):
+	"""Returns information about what function called the function that calls this function.
+	Modified code from: logging.Logger.findCaller
+
+	include_fileName (bool) - Determiens the path to the file the function is located in is included
+	include_lineNumber (bool) - Determiens if the line the function is called on is included
+	include_traceback (bool) - Determiens if traceback information is included
+
+	Example Input: getCaller()
+	Example Input: getCaller(exclude = __file__)
+	"""
+
+	def yieldInfo():
+		frame = getCurrentframe(exclude = exclude)
+		code = frame.f_code
+
+		yield code.co_name
+
+		if (include_fileName):
+			yield code.co_filename
+
+		if (include_lineNumber):
+			yield frame.f_lineno
+
+		if (include_traceback):
+			yield f"Stack (most recent call last):\n{''.join(traceback.format_list(traceback.extract_stack(frame)))}".rstrip("\n")
+
+	########################################
+
+	answer = tuple(yieldInfo())
+	if (forceTuple or (len(answer) is not 1)):
+		return answer
+	else:
+		return next(iter(answer), None)
 		
 class EtcFunctions():
 	"""An assortment of etc functions."""
@@ -1340,6 +1462,11 @@ class EtcFunctions():
 	@classmethod
 	def extendString(cls, *args, **kwargs):
 		return extendString(cls, *args, **kwargs)
+
+	@classmethod
+	def getCaller(cls, *args, **kwargs):
+		return getCaller(*args, **kwargs)
+
 
 def _get(itemCatalogue, itemLabel = None, returnExists = False, exclude = None):
 	"""Searches the label catalogue for the requested object.
@@ -1388,6 +1515,7 @@ def _get(itemCatalogue, itemLabel = None, returnExists = False, exclude = None):
 			#Slice catalogue via creation date
 			if (begin and (item not in exclude)):
 				handleList.append(itemCatalogue[item])
+
 		return handleList
 
 	elif (itemLabel not in itemCatalogue):
@@ -1408,19 +1536,21 @@ def _get(itemCatalogue, itemLabel = None, returnExists = False, exclude = None):
 	raise KeyError(errorMessage)
 
 class Container():
-	def __init__(self, dataCatalogue = None, label_variable = None, replaceMethods = False, **kwargs):
-		self._dataCatalogue = ensure_dict(dataCatalogue)
-		self._label_variable = ensure_string(label_variable, returnForNone = "label")
+	def __init__(self, dataCatalogue = None, label_variable = None):
+		assert not hasattr(self, "_dataCatalogue")
 
-		if (replaceMethods):
-			self.__len__ = self._dataCatalogue.__len__
-			self.__iter__ = self._dataCatalogue.__iter__
-			self.__exit__ = self._dataCatalogue.__exit__
-			self.__enter__ = self._dataCatalogue.__enter__
-			self.__getitem__ = self._dataCatalogue.__getitem__
-			self.__setitem__ = self._dataCatalogue.__setitem__
-			self.__delitem__ = self._dataCatalogue.__delitem__
-			self.__contains__ = self._dataCatalogue.__contains__
+		if (isinstance(dataCatalogue, str)):
+			if (not hasattr(self, dataCatalogue)):
+				setattr(self, dataCatalogue, {})
+			self._dataCatalogue = getattr(self, dataCatalogue)
+
+		elif (dataCatalogue is None):
+			self._dataCatalogue = {}
+			
+		else:
+			raise NotImplementedError(dataCatalogue)
+
+		self._label_variable = ensure_string(label_variable, returnForNone = "label")
 
 	def __repr__(self):
 		representation = f"{self.__class__.__name__}(id = {id(self)}"
@@ -1442,7 +1572,7 @@ class Container():
 		return _get(self._dataCatalogue, key, returnExists = True)
 
 	def __iter__(self):
-		return _Iterator(self._dataCatalogue)
+		return CommonIterator(self._dataCatalogue)
 
 	def __getitem__(self, key):
 		return _get(self._dataCatalogue, key)
@@ -1468,6 +1598,45 @@ class Container():
 
 	def items(self, *args, **kwargs):
 		return self._dataCatalogue.items(*args, **kwargs)
+
+	# def mirrorContainer(self, source):
+	# 	"""Mirrors the methods from another object.
+
+	# 	Example Input: mirrorContainer(gui_maker)
+	# 	"""
+
+	# 	def apply_or_remove(functionName, isFunction = True):
+	# 		"""Either mirrors this function, or removes it.
+
+	# 		Example Input: apply_or_remove("keys")
+	# 		"""
+
+	# 		if (hasattr(source, functionName)):
+	# 			setattr(self, functionName, getattr(source, functionName))
+	# 		elif (isFunction):
+	# 			setattr(self, functionName, NotImplementedError)
+	# 		else:
+	# 			delattr(self, functionName)
+
+	# 	###############################
+
+	# 	print("@1", self.__getitem__, source.__getitem__)
+
+	# 	self.__len__ = source.__len__
+	# 	self.__iter__ = source.__iter__
+	# 	self.__exit__ = source.__exit__
+	# 	self.__enter__ = source.__enter__
+	# 	self.__getitem__ = source.__getitem__
+	# 	self.__setitem__ = source.__setitem__
+	# 	self.__delitem__ = source.__delitem__
+	# 	self.__contains__ = source.__contains__
+
+	# 	apply_or_remove("keys")
+	# 	apply_or_remove("items")
+	# 	apply_or_remove("values")
+	# 	apply_or_remove("_dataCatalogue", isFunction = False)
+
+	# 	print("@2", self.__getitem__, source.__getitem__)
 
 	def getValue(self, variable, order = True, includeMissing = True, exclude = [], sortNone = False, reverse = False, getFunction = None):
 		"""Returns a list of all values for the requested variable.

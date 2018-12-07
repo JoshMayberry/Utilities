@@ -24,6 +24,9 @@ else:
 
 NULL = common.NULL	
 
+class NoActiveWindowError(Exception):
+	pass
+
 def wrap_skipEvent(includeSelf = True):
 	def decorator(function):
 		@functools.wraps(function)
@@ -1807,16 +1810,48 @@ def _unclip(dc):
 	
 	dc.DestroyClippingRegion()
 
-def _window_to_bitmap(window):
+def getWindowAsBitmap(window = None, *, useFrame = True, onlyThis = False):
+	"""Makes a bmp of what a wxWindow looks like.
+	Modified code from Andrea Gavana on: https://www.blog.pythonlibrary.org/2010/04/16/how-to-take-a-screenshot-of-your-wxpython-app-and-print-it/
+	See: https://stackoverflow.com/questions/4773961/get-a-widgets-dc-in-wxpython/4783203#4783203
+
+	window (wxWindow) - What object to get a bitmap of
+		- If None: Will use the currently active wxWindow
+
+	useFrame (bool) - Determines how to use 'window
+		- If True: Will use the wxFrame 'window' is nested in
+		- If False: Will use 'window' directly
+
+	onlyThis (bool) - Determines what in the frame is used to create the bitmap
+		- If True: Only this wxWindow object will be used
+		- If False: What the screen looks like where this wxWindow is will be used
+
+	Example Input: getWindowAsBitmap(self.thing)
 	"""
-	Makes a bmp of what a wxWindow looks like.
-	Code from FogleBird on https://stackoverflow.com/questions/4773961/get-a-widgets-dc-in-wxpython
-	"""
-	width, height = window.GetSize()
-	bitmap = wx.EmptyBitmap(width, height)
-	wdc = wx.WindowDC(window)
-	mdc = wx.MemoryDC(bitmap)
-	mdc.Blit(0, 0, width, height, wdc, 0, 0)
+
+	if (window is None):
+		window = wx.GetActiveWindow()
+		if (window is None):
+			raise NoActiveWindowError()
+
+	if (useFrame):
+		window = wx.GetTopLevelParent(window)
+
+	x, y, width, height = window.GetRect()
+	bitmap = wx.Bitmap(width, height)
+
+	if (onlyThis):
+		x_offset = 0
+		y_offset = 0
+		source_dc = wx.WindowDC(window)
+	else:
+		x_offset = x
+		y_offset = y
+		source_dc = wx.ScreenDC()
+
+	memory_dc = wx.MemoryDC(bitmap)
+	memory_dc.Blit(0, 0, width, height, source_dc, x_offset, y_offset)
+	memory_dc.SelectObject(wx.NullBitmap)
 	return bitmap
 
 @contextlib.contextmanager
@@ -1882,10 +1917,50 @@ class DrawFunctions():
 		return _unclip(*args, **kwargs)
 		
 	@classmethod
-	def _window_to_bitmap(cls, *args, **kwargs):
-		return _window_to_bitmap(*args, **kwargs)
+	def getWindowAsBitmap(cls, *args, **kwargs):
+		return getWindowAsBitmap(*args, **kwargs)
 		
 	@classmethod
 	def _useOverlay(cls, *args, **kwargs):
 		return _useOverlay(*args, **kwargs)
 
+imageTypeCatalogue = common._dict({
+	"any": 		wx.BITMAP_TYPE_ANY, 		None: "${any}", 
+	"bmp": 		wx.BITMAP_TYPE_BMP, 
+	"gif": 		wx.BITMAP_TYPE_GIF, 
+	"png": 		wx.BITMAP_TYPE_PNG, 
+	"jpeg": 	wx.BITMAP_TYPE_JPEG, 
+
+	"ico": 		wx.BITMAP_TYPE_ICO, 
+	"icon": 	wx.BITMAP_TYPE_ICON, 
+	"cur": 		wx.BITMAP_TYPE_CUR, 
+
+	"tif": 		wx.BITMAP_TYPE_TIF, 
+	"tiff": 	wx.BITMAP_TYPE_TIFF, 
+	"ani": 		wx.BITMAP_TYPE_ANI, 
+	"iff": 		wx.BITMAP_TYPE_IFF, 
+	"tga": 		wx.BITMAP_TYPE_TGA, 
+	"pnm": 		wx.BITMAP_TYPE_PNM, 
+	"pcx": 		wx.BITMAP_TYPE_PCX, 
+	"pict": 	wx.BITMAP_TYPE_PICT, 
+
+	"xbm": 		wx.BITMAP_TYPE_XBM, 
+	"xpm": 		wx.BITMAP_TYPE_XPM, 
+	"xbm_data": wx.BITMAP_TYPE_XBM_DATA, 
+	"xpm_data": wx.BITMAP_TYPE_XPM_DATA, 
+
+}, caseSensitive = False, typeSensitive = False)
+def saveBitmap(bitmap, fileName, *, imageType = None):
+	"""Saves the given bitmap.
+
+	bitmap (wxBitmap) - What bitmap to save
+	fileName (str) - Where to save the bitmap
+		- If io.StreamIO: Will save the bitmap to this io stream
+
+	Example Input: saveBitmap(bitmap, "lorem", imageType = "bmp")
+	Example Input: saveBitmap(bitmap, stream, imageType = "bmp")
+	"""
+	global imageTypeCatalogue
+
+	image = bitmap.ConvertToImage()
+	image.SaveFile(fileName, imageTypeCatalogue.get(imageType))

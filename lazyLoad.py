@@ -1,27 +1,29 @@
 import lazy_import
 
+#Some lazy imports are turned off for now, because of: https://github.com/mnmelo/lazy_import/issues/10
+
 _loadCatalogue = {
 	"wx": (
-		"wx.adv", 
-		"wx.grid", 
-		"wx.html", 
+		# "wx.adv", 
+		# "wx.grid", 
+		# "wx.html", 
 
-		"wx.lib.masked", 
-		"wx.lib.buttons", 
-		"wx.lib.dialogs", 
-		"wx.lib.newevent", 
-		"wx.lib.wordwrap", 
-		"wx.lib.splitter", 
-		"wx.lib.scrolledpanel", 
-		"wx.lib.mixins.listctrl", 
+		# "wx.lib.masked", 
+		# "wx.lib.buttons", 
+		# "wx.lib.dialogs", 
+		# "wx.lib.newevent", 
+		# "wx.lib.wordwrap", 
+		# "wx.lib.splitter", 
+		# "wx.lib.scrolledpanel", 
+		# "wx.lib.mixins.listctrl", 
 
-		"wx.lib.agw.aui", 
-		"wx.lib.agw.flatmenu", 
-		"wx.lib.agw.floatspin", 
-		"wx.lib.agw.multidirdialog", 
-		"wx.lib.agw.fourwaysplitter", 
-		"wx.lib.agw.ultimatelistctrl", 
-		"wx.lib.agw.genericmessagedialog", 
+		# "wx.lib.agw.aui", 
+		# "wx.lib.agw.flatmenu", 
+		# "wx.lib.agw.floatspin", 
+		# "wx.lib.agw.multidirdialog", 
+		# "wx.lib.agw.fourwaysplitter", 
+		# "wx.lib.agw.ultimatelistctrl", 
+		# "wx.lib.agw.genericmessagedialog", 
 	),
 
 	"sqlalchemy": (
@@ -36,6 +38,7 @@ _loadCatalogue = {
 		"email.encoders",
 		"email.mime.base.MIMEBase",
 		"email.mime.text.MIMEText",
+		"email.mime.image.MIMEImage",
 		"email.mime.multipart.MIMEMultipart",
 	),
 

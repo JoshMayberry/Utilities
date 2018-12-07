@@ -105,8 +105,8 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			if (label not in functions):
 				return
 
-			for locations in (catalogue.values(), unnamed):
-				for child in locations:
+			for container in (catalogue.values(), unnamed):
+				for child in container:
 					if (child.myFunction is label):
 						return child
 
@@ -258,28 +258,50 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 
 		return self.listen(myFunction = myFunction, *args, oneShot = oneShot, **kwargs)
 
+	def pause(self, state = True):
+		"""Pauses all listeners.
+
+		Example Input: pause()
+		Example Input: pause(state = False)
+		"""
+
+		for container in (listener_catalogue.values(), listener_unnamed):
+			for listener in container:
+				listener.pause(state = state)
+
 	class Listener():
-		def __init__(self, parent, myFunction = None, *args, label = None, 
+		def __init__(self, parent, myFunction = None, *args, label = None, condition_start = None,
 			delay = 1000, delayAfter = False, pauseOnDialog = False, notPauseOnDialog = None, 
 			trigger = None, oneShot = None, bool_includeStop = True, bool_includePause = False, 
 			
 			resultFunction = None, resultFunctionArgs = None, resultFunctionKwargs = None, 
 			alternativeFunction = None, alternativeFunctionArgs = None, alternativeFunctionKwargs = None, 
+			preStartFunction = None, preStartFunctionArgs = None, preStartFunctionKwargs = None, 
+			postStartFunction = None, postStartFunctionArgs = None, postStartFunctionKwargs = None, 
+			postFunction = None, postFunctionArgs = None, postFunctionKwargs = None, 
 			
-			shown = False, makeThread = True, **kwargs):
+			shown = False, makeThread = True, threadName = NULL, **kwargs):
 			"""An object that loops a threaded function
 
 			label (str) - What this listener should be catalogued as
+			getThreadName (str) - What the thread should be catalogued as
+				- If NULL: Will use 'label'
 
 			myFunction (function) - A function that checks certain conditions
 			resultFunction (function) - A function that runs if 'myFunction' return True
+			preStartFunction (function) - A function that runs before a new thread starts
+			postStartFunction (function) - A function that runs after a new thread starts
+			postFunction (function) - A function that runs after a thread has finished
 			alternativeFunction (function) - A function that runs instead of 'myFunction' if the one-shot is already made
 
 			args (*) - Given to MyUtilities.common.runMyFunction()
 			kwargs (**) - Given to MyUtilities.common.runMyFunction()
 
-			bool_includeStop (bool) - Determines if 'stop' should be considered in __bool__()
-			bool_includePause (bool) - Determines if 'pause' should be considered in __bool__()
+			bool_includeStop (bool) - Determines if 'stopFlag' should be considered in __bool__()
+			bool_includePause (bool) - Determines if 'pauseFlag' should be considered in __bool__()
+			condition_start (callable) - A callable function that determines if this listener is allowed to start a new thread or not
+				~ Should take no args or kwargs, and should return True or False
+				- If None: Will ignore this variable
 
 			Example Input: Listener(self, myFunction = self.autoSave, trigger = True)
 			Example Input: Listener(self, myFunction = self.checkCapsLock, shown = True)
@@ -292,7 +314,9 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			self.label = label
 			self.shown = shown
 			self.parent = parent
+			self.threadName = threadName
 			self.makeThread = makeThread
+			self.condition_start = condition_start
 			self.bool_includePause = bool_includePause
 			self.bool_includeStop = bool_includeStop
 
@@ -315,6 +339,14 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			self.alternativeFunction = alternativeFunction
 			self.alternativeFunctionArgs = alternativeFunctionArgs
 			self.alternativeFunctionKwargs = alternativeFunctionKwargs
+
+			self.preStartFunction = preStartFunction
+			self.preStartFunctionArgs = preStartFunctionArgs
+			self.preStartFunctionKwargs = preStartFunctionKwargs
+
+			self.postFunction = postFunction
+			self.postFunctionArgs = postFunctionArgs
+			self.postFunctionKwargs = postFunctionKwargs
 
 			self.parent._add(self, catalogue = self.parent.listener_catalogue, unnamed = self.parent.listener_unnamed, functions = self.parent.listener_functions, lock = self.parent.listener_lock)
 
@@ -366,7 +398,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 
 			def setter(self, value):
 				with self.parent.listener_lock:
-					self._delay = int(MyUtilities.common.ensure_default(value, default = 0))
+					self._delay = float(MyUtilities.common.ensure_default(value, default = 0))
 
 		@MyUtilities.common.makeProperty(default = False)
 		class delayAfter():
@@ -391,20 +423,20 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 					self._canRun = bool(value)
 
 		@MyUtilities.common.makeProperty(default = False)
-		class stop():
+		class stopFlag():
 			"""Determines if the listening routine should be stopped."""
 
 			def setter(self, value):
 				with self.parent.listener_lock:
-					self._stop = bool(value)
+					self._stopFlag = bool(value)
 
 		@MyUtilities.common.makeProperty(default = False)
-		class pause():
+		class pauseFlag():
 			"""Determines if the listening routine should be paused."""
 
 			def setter(self, value):
 				with self.parent.listener_lock:
-					self._pause = bool(value)
+					self._pauseFlag = bool(value)
 
 		@MyUtilities.common.makeProperty(default = None)
 		class trigger():
@@ -481,11 +513,14 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 		def _checkClear(self):
 			"""Tells other threads listening for 'myFunction' to stop."""
 
-			while (self.listening > 0):
-				self.stop = True
-				time.sleep(100 / 1000)
+			if (self.listening > 0):
+				# self.parent.log_debug("Listener Waiting", label = self.label, listening = self.listening, total = threading.active_count())
 
-			self.stop = False
+				while (self.listening > 0):
+					self.stopFlag = True
+					time.sleep(100 / 1000)
+
+			self.stop(state = False)
 
 		def _wait(self):
 			"""Sleeps for the set delay."""
@@ -498,9 +533,9 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 		def _checkPause(self):
 			"""Accounts for pausing the listening routine for 'myFunction'."""
 
-			while (self.pause):
-				if (self.stop):
-					self.pause = False
+			while (self.pauseFlag):
+				if (self.stopFlag):
+					self.pause(state = False)
 					return
 
 				self._wait()
@@ -512,7 +547,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 				return
 
 			while (not self.trigger):
-				if (self.stop):
+				if (self.stopFlag):
 					return True
 
 				self._wait()
@@ -524,7 +559,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 
 			if (self.canRun):
 				if (self.oneShot):
-					self.canRun = False
+					self.reset(state = False)
 				answer = MyUtilities.common.runMyFunction(self.myFunction, *self.functionArgs, **self.functionKwargs)
 			else:
 				answer = MyUtilities.common.runMyFunction(self.alternativeFunction, myFunctionArgs = self.alternativeFunctionArgs, myFunctionKwargs = self.alternativeFunctionKwargs, **dict(_yieldKwargs(self.functionKwargs)))
@@ -540,19 +575,20 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 
 			self.listening += 1
 			try:
+				self.parent.log_info("Listener Routine Start", label = self.label, delay = self.delay, trigger = self.trigger, total = threading.active_count())
 				while True:
-					if (self.stop):
+					if (self.stopFlag):
 						break
 
 					if (self._checkPause()):
-						self.stop = True
+						self.stop()
 						break
 
 					if (not self.delayAfter):
 						self._wait()
 
 					if (self._checkTrigger()):
-						self.stop = True
+						self.stop()
 						break
 
 					self._runFunction()
@@ -565,13 +601,39 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 
 			finally:
 				self.listening -= 1
+				# self.parent.log_debug("Listener Routine Finished", label = self.label, total = threading.active_count())
 
-		def reset(self):
-			"""Resets the one-shot for this listener."""
+		#User Functions
+		def reset(self, state = True):
+			"""Resets the one-shot for this listener.
 
-			self.canRun = True
+			Example Input: reset()
+			Example Input: reset(state = False)
+			"""
 
-		def start(self):
+			self.canRun = state
+
+		def stop(self, state = True):
+			"""Tells the listener to stop the listening routine.
+
+			Example Input: stop()
+			Example Input: stop(state = False)
+			"""
+
+			# self.parent.log_debug(f"Listener {('Not ', '')[state]}Stopping", label = self.label, total = threading.active_count())
+			self.stopFlag = state
+
+		def pause(self, state = True):
+			"""Tells the listener to pause the listening routine.
+
+			Example Input: pause()
+			Example Input: pause(state = False)
+			"""
+
+			# self.parent.log_debug(f"Listener {('Not ', '')[state]}Pausing", label = self.label, total = threading.active_count())
+			self.pauseFlag = state
+
+		def start(self, threadName = NULL):
 			"""Starts the listen routine.
 
 			Example Input: start()
@@ -580,7 +642,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			def stopFunction():
 				nonlocal self
 
-				self.stop = True
+				self.stop()
 
 			def _checkOneShot():
 				"""Accounts for one-shot functions.
@@ -597,12 +659,31 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 
 				return True
 
+			def getThreadName():
+				nonlocal self, threadName
+
+				if (threadName is not NULL):
+					return threadName
+
+				if (self.threadName is not NULL):
+					return self.threadName
+
+
+				return self.label
+
 			######################
+
+			# self.parent.log_debug(f"Listener Starting", label = self.label, total = threading.active_count())
 
 			if (_checkOneShot()):
 				return False
 
-			self.parent.backgroundRun(self._listenRoutine, shown = self.shown, makeThread = self.makeThread, stopFunction = stopFunction)
+			if ((self.condition_start is not None) and (not self.condition_start())):
+				return False
+
+			self.parent.backgroundRun(self._listenRoutine, name = getThreadName(), shown = self.shown, makeThread = self.makeThread, stopFunction = stopFunction,
+				preStartFunction = self.preStartFunction, preStartFunctionArgs = self.preStartFunctionArgs, preStartFunctionKwargs = self.preStartFunctionKwargs, 
+				postFunction = self.postFunction, postFunctionArgs = self.postFunctionArgs, postFunctionKwargs = self.postFunctionKwargs)
 
 	class MyThread(threading.Thread):
 		"""Used to run functions in the background.
@@ -650,7 +731,6 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			daemon (bool)  - Sets whether the thread is daemonic. If None (the default), the daemonic property is inherited from the current thread.
 			label (str) - A name for the thread
 				- If name already exists: Will stop the existing thread and replace it with this one
-			stopFunction (function) - An extra function used to stop the thread
 			
 			Example Input: MyThread(self)
 			Example Input: MyThread(self, name = "Thread-1")
@@ -713,6 +793,9 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			self.parent._add(self, catalogue = self.parent.thread_catalogue, unnamed = self.parent.thread_unnamed, functions = self.parent.thread_functions, lock = self.parent.thread_lock, canReplace = True)
 
 		def runFunction(self, myFunction = None, *args, window = None, shown = False,
+			preStartFunction = None, preStartFunctionArgs = None, preStartFunctionKwargs = None, 
+			postStartFunction = None, postStartFunctionArgs = None, postStartFunctionKwargs = None, 
+			postFunction = None, postFunctionArgs = None, postFunctionKwargs = None, 
 			stopFunction = None, stopFunctionArgs = None, stopFunctionKwargs = None, **kwargs):
 			"""Sets the function to run in the thread object.
 
@@ -725,6 +808,11 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			shown (bool) - Determines what happens if 'window' is not shown yet
 				- If True: It will wait for 'window' to be shown before running 'myFunction'
 				- If False: 'myFunction' will run regardless of if 'window' is shown or not
+
+			stopFunction (function) - An extra function used to stop the thread
+			preStartFunction (function) - A function that runs before the thread starts
+			preStartFunction (function) - A function that runs after the thread starts
+			postFunction (function) - A function that runs after the thread has finished running 'myFunction'
 
 			Example Input: runFunction(myFunction = longFunction, myFunctionKwargs = (1, 2), myFunctionKwargs = {"label": "Lorem"})
 			"""
@@ -739,6 +827,17 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			self.stopFunction = stopFunction
 			self.stopFunctionArgs = stopFunctionArgs
 			self.stopFunctionKwargs = stopFunctionKwargs
+
+			self.postStartFunction = postStartFunction
+			self.postStartFunctionArgs = postStartFunctionArgs
+			self.postStartFunctionKwargs = postStartFunctionKwargs
+
+			self.postFunction = postFunction
+			self.postFunctionArgs = postFunctionArgs
+			self.postFunctionKwargs = postFunctionKwargs
+
+			if (preStartFunction is not None):
+				MyUtilities.common.runMyFunction(myFunction = preStartFunction, myFunctionArgs = preStartFunctionArgs, myFunctionKwargs = preStartFunctionKwargs, **dict(_yieldKwargs(self.functionKwargs, selfObject = self.parent)))
 
 			self.start()
 
@@ -780,11 +879,17 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			self.parent.log_info("Running Thread", name = self.name, total = threading.active_count())
 
 			try:
+				if (self.postStartFunction is not None):
+					MyUtilities.common.runMyFunction(myFunction = self.postStartFunction, myFunctionArgs = self.postStartFunctionArgs, myFunctionKwargs = self.postStartFunctionKwargs, **dict(_yieldKwargs(self.functionKwargs, selfObject = self.parent)))
+
 				self._threadRoutine()
+
+				if (self.postFunction is not None):
+					MyUtilities.common.runMyFunction(myFunction = self.postFunction, myFunctionArgs = self.postFunctionArgs, myFunctionKwargs = self.postFunctionKwargs, **dict(_yieldKwargs(self.functionKwargs, selfObject = self.parent)))
 
 			finally:
 				self.parent._remove(self, catalogue = self.parent.thread_catalogue, unnamed = self.parent.thread_unnamed, functions = self.parent.thread_functions, lock = self.parent.thread_lock)
-
+			
 			self.parent.log_info("Closing Thread", name = self.name, total = threading.active_count())
 
 		def join(self, *args, **kwargs):
@@ -809,7 +914,7 @@ class CommonFunctions():
 
 	def backgroundRun(self, *args, selfObject = None, **kwargs):
 		return self.threadManager.backgroundRun(*args, **kwargs, 
-			selfObject = ensure_default(selfObject, default = self))
+			selfObject = MyUtilities.common.ensure_default(selfObject, default = self))
 
 	def onBackgroundRun(event, *args, **kwargs):
 		"""A wxEvent version of backgroundRun()."""
@@ -817,13 +922,17 @@ class CommonFunctions():
 		self.backgroundRun(*args, **kwargs)
 		event.Skip()
 
+	def pause(self, *args, selfObject = None, **kwargs):
+		return self.threadManager.pause(*args, **kwargs, 
+			selfObject = MyUtilities.common.ensure_default(selfObject, default = self))
+
 	def listen(self, *args, selfObject = None, **kwargs):
 		return self.threadManager.listen(*args, **kwargs, 
-			selfObject = ensure_default(selfObject, default = self))
+			selfObject = MyUtilities.common.ensure_default(selfObject, default = self))
 
 	def oneShot(self, *args, selfObject = None, **kwargs):
 		return self.threadManager.oneShot(*args, **kwargs, 
-			selfObject = ensure_default(selfObject, default = self))
+			selfObject = MyUtilities.common.ensure_default(selfObject, default = self))
 
 if (__name__ == "__main__"):
 	def test_backgroundRun():
