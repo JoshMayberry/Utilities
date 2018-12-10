@@ -3,11 +3,14 @@ import sys
 import ast
 import types
 
+import io
 import re
 import stat
 import queue
 import shutil
 import typing
+
+import contextlib
 import collections
 
 import inspect
@@ -54,6 +57,159 @@ class ELEMENT():
 
 class CATALOGUE():
 	"""Used to make a class pass ensure_dict() as a dict instead of a dict key or value."""
+
+#Inheritance Flagging
+def makeTracker(myFunction, *args, skipFirst = False, extraClass = None, **kwargs):
+	"""Returns a metaclass that is able to run a function when inherited.
+
+	myFunction (function) - What function to run when the tracker is inherited
+		~ Must take the inherited class as the first (non-self) parameter
+		- If str: Will call a class function from the new class that matches that variable
+
+	args (*) - Given to myFunction
+	kwargs (*) - Given to myFunction
+
+	skipFirst (bool) - Determines if the first class to inherit the tracker will not trigger the function
+		~ The first class to inherit the tracker is the one who assigns the metaclass
+
+	extraClass (type) - Extra classes that need to be combined with the meta class to avoid the following error:
+		TypeError: metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases
+		~ See: https://stackoverflow.com/questions/11276037/resolving-metaclass-conflicts/41266737#41266737
+
+	___________________________________________________________
+
+	Example Use:
+		def sit(cls):
+			print("Lorem Ipsum", cls)
+
+		class Lorem(metaclass = makeTracker(sit, skipFirst = True)):
+			pass
+
+		class Ipsum():
+			class Dolor(Lorem):
+				pass
+
+	Alternative Syntax:
+		class Lorem(metaclass = makeTracker("sit")):
+			def sit(cls):
+				print("Lorem Ipsum", cls)
+	___________________________________________________________
+
+	Example Use:
+		def sit(cls):
+			print("Lorem Ipsum", cls)
+
+		class A(type): pass
+		class B(metaclass = A): pass
+		class C(B, metaclass = makeTracker(sit, extraClass = B)): pass
+		class D(C): pass
+	___________________________________________________________
+
+	Example Input: makeTracker(lorem)
+	Example Input: makeTracker(lorem, skipFirst = True)
+	Example Input: makeTracker(lorem, extraClass = Ipsum)
+	"""
+
+	class Tracker(type):
+		def __new__(cls, name, bases, catalogue):
+			nonlocal myFunction, args, kwargs, skipFirst
+
+			newClass = type.__new__(cls, name, bases, catalogue)
+
+			if (skipFirst):
+				skipFirst = False
+				return newClass
+
+			if (isinstance(myFunction, str)):
+				myFunction = getattr(newClass, myFunction)
+
+			myFunction(newClass, *args, **kwargs)
+			return newClass
+
+	if (extraClass is not None):
+		class Tracker_Patch(Tracker, *getMetaclass(extraClass, forceTuple = True)): 
+			pass
+		return Tracker_Patch
+	return Tracker
+
+def metaclass_resolver(*classes):
+	"""Helps solve the following error:
+		TypeError: metaclass conflict: the metaclass of a derived class must be a (non-strict) subclass of the metaclasses of all its bases
+	Modified code from: https://stackoverflow.com/questions/11276037/resolving-metaclass-conflicts/41266737#41266737
+	___________________________________________________________
+
+	Example Use:
+		class M_A(type): pass
+		class M_B(type): pass
+		class A(metaclass = M_A): pass
+		class B(metaclass = M_B): pass
+		class C(metaclass_resolver(A, B)): pass
+	___________________________________________________________
+	
+	Example Input: metaclass_resolver(Lorem, Ipsum)
+	"""
+
+	metaclass = tuple(set(type(cls) for cls in classes))
+
+	if (len(metaclass) is 1):
+		metaclass = metaclass[0]
+	else:
+		metaclass = type("_".join(cls.__name__ for cls in metaclass), metaclass, {})
+	return metaclass("_".join(cls.__name__ for cls in classes), classes, {})
+
+def getMetaclass(cls, includeNested = True, forceTuple = False):
+	"""Returns the metaclass of 'cls'
+
+	includeNested (bool) - Determines if nested bases are checked for their meta classes as well
+	___________________________________________________________
+
+	Example Use:
+		class M_A(type): pass
+		class M_B(type): pass
+		class A(metaclass = M_A): pass
+		class B(metaclass = M_B): pass
+		class M_AM_B(M_A, M_B): pass
+		class C(A, B, metaclass = M_AM_B): pass
+
+		print(getMetaclass(A))
+		print(getMetaclass(C))
+	___________________________________________________________
+
+	Example Input: getMetaclass(Lorem)
+	"""
+
+	exclude = (type, object)
+
+	def yieldAnswer():
+		nonlocal cls, includeNested
+
+		metaclass = type(cls)
+
+		if (includeNested):
+			for item in metaclass.__bases__:
+				if (item in exclude):
+					continue
+
+				yield item
+
+				for answer in getMetaclass(item, forceTuple = True):
+					yield answer
+
+		if (metaclass not in exclude):
+			yield metaclass
+
+	####################
+
+	if (cls in exclude):
+		if (forceTuple):
+			return ()
+		return
+
+	answer = tuple(yieldAnswer())
+	if (forceTuple or (len(answer) is not 1)):
+		return answer
+	else:
+		return next(iter(answer), None)
 
 #Iterators
 class CommonIterator(object):
@@ -604,7 +760,7 @@ def ensure_string(value, *, returnForNone = "", extend = None):
 	return f"{value}".format(extend)
 	
 def ensure_functionInput(myFunction = None, *args, myFunctionArgs = None, myFunctionKwargs = None, 
-	includeSelf = False, selfObject = None, includeEvent = False, event = None, **kwargs):
+	includeSelf = False, selfObject = None, self = None, includeEvent = False, event = None, **kwargs):
 	"""Makes sure that 'myFunctionArgs' and 'myFunctionKwargs' are able to be passed into 'myFunction' correctly.
 	Yields the following for each function to run: (myFunction, myFunctionArgs, myFunctionKwargs).
 
@@ -635,6 +791,10 @@ def ensure_functionInput(myFunction = None, *args, myFunctionArgs = None, myFunc
 	Example Input: ensure_functionInput([lorem, ipsum], myFunctionArgs = (1, 2))
 	"""
 
+	if (self is not None):
+		assert selfObject is None
+		selfObject = self
+
 	def yieldArgs(n):
 		def yieldCombined(argList):
 			nonlocal includeSelf, selfObject, includeEvent, event, args
@@ -648,16 +808,22 @@ def ensure_functionInput(myFunction = None, *args, myFunctionArgs = None, myFunc
 			for item in args:
 				yield item
 
-			for item in argList:
+			for item in ensure_container(argList):
 				yield item
 
 		def yieldFormatted():
-			nonlocal myFunctionArgs
+			nonlocal myFunctionArgs, n
 
 			argsList = ensure_container(myFunctionArgs)
 
+			if (not argsList):
+				for i in range(n):
+					yield ()
+				return
+
 			if (n is 1):
 				yield argsList
+				return
 
 			if (len(argsList) != n):
 				errorMessage = f"A list of length {n} is required for myFunctionArgs, but it has a length of {len(argsList)}"
@@ -672,21 +838,30 @@ def ensure_functionInput(myFunction = None, *args, myFunctionArgs = None, myFunc
 			yield tuple(yieldCombined(item))
 
 	def yieldKwargs(n):
-		nonlocal myFunctionKwargs
+		def yieldFormatted():
+			nonlocal myFunctionKwargs, n
 
-		kwargsList = ensure_container({**kwargs, **ensure_dict(myFunctionKwargs)})
+			if (not myFunctionKwargs):
+				for item in range(n):
+					yield {}
+				return
 
-		if (not kwargsList):
-			for i in range(n):
-				yield {}
-			return
+			if (n is 1):
+				yield myFunctionKwargs
+				return
 
-		if (len(kwargsList) != n):
-			errorMessage = f"A list of length {n} is required for myFunctionKwargs, but it has a length of {len(kwargsList)}"
-			raise SyntaxError(errorMessage)
+			kwargsList = ensure_container(myFunctionKwargs)
+			if (len(kwargsList) != n):
+				errorMessage = f"A list of length {n} is required for myFunctionKwargs, but it has a length of {len(kwargsList)}"
+				raise SyntaxError(errorMessage)
 
-		for item in kwargsList:
-			yield item
+			for item in kwargsList:
+				yield item
+
+		#########################################
+
+		for catalogue in yieldFormatted():
+			yield {**kwargs, **catalogue}
 
 	####################################
 
@@ -695,6 +870,7 @@ def ensure_functionInput(myFunction = None, *args, myFunctionArgs = None, myFunc
 		return
 
 	n = len(functionList)
+
 	for item in zip(functionList, yieldArgs(n), yieldKwargs(n)):
 		yield item
 
@@ -1447,6 +1623,50 @@ def getCaller(*, exclude = None, forceTuple = False,
 		return answer
 	else:
 		return next(iter(answer), None)
+
+@contextlib.contextmanager
+def openPlus(location = None, flag = "w", *, newline = "\n", closeIO = True):
+	"""Automates opening files in different ways.
+
+	location (str) - Where the file to open is located on disk
+		~ If None: Will open an empty io stream
+		~ If IO stream: Will use that location in RAM
+
+	flag (str) - How to open the location
+
+	Example Input: openPlus("example.ini")
+	Example Input: openPlus(myStream)
+	Example Input: openPlus(myStream, flag = "wb")
+	"""
+
+	def getHandle():
+		nonlocal location, flag, newline
+
+		if (location is None):
+			if ("b" in flag):
+				return io.BytesIO(location)
+			return io.StringIO(location, newline = newline)
+
+		if (isinstance(location, str)):
+			directory = os.path.dirname(location)
+			if (directory):
+				os.makedirs(directory, exist_ok = True)
+
+			return open(location, flag)
+
+		if (isinstance(location, io.IOBase)):
+			return location
+
+		raise NotImplementedError(type(location))
+
+	#####################################
+
+	if (not closeIO):
+		yield getHandle()
+		return
+		
+	with getHandle() as fileHandle:
+		yield fileHandle
 		
 class EtcFunctions():
 	"""An assortment of etc functions."""
@@ -1466,6 +1686,10 @@ class EtcFunctions():
 	@classmethod
 	def getCaller(cls, *args, **kwargs):
 		return getCaller(*args, **kwargs)
+
+	@classmethod
+	def openPlus(cls, *args, **kwargs):
+		return openPlus(*args, **kwargs)
 
 
 def _get(itemCatalogue, itemLabel = None, returnExists = False, exclude = None):

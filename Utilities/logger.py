@@ -110,6 +110,8 @@ class Logger():
 		self._setLogger(label)
 		self._setConfig(config)
 
+		self.silent = False
+
 	@MyUtilities.common.makeProperty()
 	class label():
 		def setter(self, value):
@@ -207,6 +209,15 @@ class Logger():
 				applyLogger(sectionCatalogue)
 			else:
 				applyHandler({**sectionCatalogue})
+
+	def quiet(self, state = True):
+		"""Makes the logger not log things temporarily.
+
+		Example Input: quiet()
+		Example Input: quiet(state = False)
+		"""
+
+		self.silent = state
 
 	def setLevel(self, level = None):
 		"""Changes the severity level to log for.
@@ -424,45 +435,60 @@ class Logger():
 		for handler in self.thing.handlers:
 			self.thing.removeHandler(handler)
 
-	def debug(self, message, includeTraceback = False, **kwargs):
+	def debug(self, message, *args, includeTraceback = False, **kwargs):
 		"""Logs a message with the severity level 'debug'.
 
 		Example Input: debug("lorem ipsum")
 		"""
 
-		self.thing.debug(formatMessage(message, **kwargs), exc_info = includeTraceback)
+		if (self.silent):
+			return
 
-	def info(self, message, includeTraceback = False, **kwargs):
+		self.thing.debug(formatMessage(message, *args, **kwargs), exc_info = includeTraceback)
+
+	def info(self, message, *args, includeTraceback = False, **kwargs):
 		"""Logs a messagewith the severity level 'info'.
 
 		Example Input: info("lorem ipsum")
 		"""
 
-		self.thing.info(formatMessage(message, **kwargs), exc_info = includeTraceback)
+		if (self.silent):
+			return
 
-	def warning(self, message, includeTraceback = False, **kwargs):
+		self.thing.info(formatMessage(message, *args, **kwargs), exc_info = includeTraceback)
+
+	def warning(self, message, *args, includeTraceback = False, **kwargs):
 		"""Logs a message aswith the severity level 'warning'.
 
 		Example Input: warning("lorem ipsum")
 		"""
 
-		self.thing.warning(formatMessage(message, **kwargs), exc_info = includeTraceback)
+		if (self.silent):
+			return
 
-	def error(self, message, includeTraceback = False, **kwargs):
+		self.thing.warning(formatMessage(message, *args, **kwargs), exc_info = includeTraceback)
+
+	def error(self, message, *args, includeTraceback = False, **kwargs):
 		"""Logs a message with the severity level 'error'.
 
 		Example Input: error("lorem ipsum")
 		"""
 
-		self.thing.error(formatMessage(message, **kwargs), exc_info = includeTraceback)
+		if (self.silent):
+			return
 
-	def critical(self, message, includeTraceback = False, **kwargs):
+		self.thing.error(formatMessage(message, *args, **kwargs), exc_info = includeTraceback)
+
+	def critical(self, message, *args, includeTraceback = False, **kwargs):
 		"""Logs a message as with the severity level 'critical'.
 
 		Example Input: critical("lorem ipsum")
 		"""
 
-		self.thing.critical(formatMessage(message, **kwargs), exc_info = includeTraceback)
+		if (self.silent):
+			return
+
+		self.thing.critical(formatMessage(message, *args, **kwargs), exc_info = includeTraceback)
 
 	def yieldLogs(self, returnExisting = True, returnHistory = True):
 		"""Yields where logs are being stored.
@@ -504,12 +530,21 @@ class Logger():
 
 		return tuple(self.yieldLogs(*args, **kwargs))
 
-def formatMessage(message, **kwargs):
+def formatMessage(message, *args, **kwargs):
 	"""Adds the kwargs to the end of the message."""
 
-	if (not kwargs):
-		return message
-	return f"{message}; {'; '.join(f'{key}: {value}' for key, value in kwargs.items())}"
+	def yieldMessage():
+		yield f"{message}"
+
+		if (args):
+			yield f"; {'; '.join(f'{item}' for item in args)}"
+
+		if (kwargs):
+			yield f"; {'; '.join(f'{key}: {value}' for key, value in kwargs.items())}"
+
+	###############################
+
+	return "".join(yieldMessage())
 
 def configureHandler(handler, *, level = NULL, formatter = NULL, timestamp = NULL, formatStyle = NULL, filterer = NULL, filter_nonLevel = False):
 	"""Changes how the handler will behave.

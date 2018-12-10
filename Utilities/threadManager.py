@@ -107,7 +107,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 
 			for container in (catalogue.values(), unnamed):
 				for child in container:
-					if (child.myFunction is label):
+					if (child.myFunction == label):
 						return child
 
 	def _add(self, child, catalogue = None, unnamed = None, functions = None, lock = None, *, canReplace = False):
@@ -125,7 +125,8 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			label = child.label
 			if (label is None):
 				unnamed.add(child)
-				functions.add(child.myFunction)
+				if (child.myFunction is not None):
+					functions.add(child.myFunction)
 				return
 
 			if ((not canReplace) and (label in catalogue)):
@@ -133,7 +134,8 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 				raise KeyError(errorMessage)
 
 			catalogue[label] = child
-			functions.add(child.myFunction)
+			if (child.myFunction is not None):
+				functions.add(child.myFunction)
 
 	def _remove(self, child, catalogue = None, unnamed = None, functions = None, lock = None):
 		"""Removes a child from this threadManager.
@@ -244,6 +246,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 		##################################################
 
 		listener = _getListener()
+		assert listener is not None
 
 		if (autoStart):
 			listener.start()
@@ -272,7 +275,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 	class Listener():
 		def __init__(self, parent, myFunction = None, *args, label = None, condition_start = None,
 			delay = 1000, delayAfter = False, pauseOnDialog = False, notPauseOnDialog = None, 
-			trigger = None, oneShot = None, bool_includeStop = True, bool_includePause = False, 
+			canTrigger = None, oneShot = None, bool_includeStop = True, bool_includePause = False, 
 			
 			resultFunction = None, resultFunctionArgs = None, resultFunctionKwargs = None, 
 			alternativeFunction = None, alternativeFunctionArgs = None, alternativeFunctionKwargs = None, 
@@ -298,18 +301,21 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			kwargs (**) - Given to MyUtilities.common.runMyFunction()
 
 			bool_includeStop (bool) - Determines if 'stopFlag' should be considered in __bool__()
-			bool_includePause (bool) - Determines if 'pauseFlag' should be considered in __bool__()
+			bool_includePause (bool) - Determines if 'no_pauseFlag' should be considered in __bool__()
 			condition_start (callable) - A callable function that determines if this listener is allowed to start a new thread or not
 				~ Should take no args or kwargs, and should return True or False
 				- If None: Will ignore this variable
 
-			Example Input: Listener(self, myFunction = self.autoSave, trigger = True)
+			Example Input: Listener(self, myFunction = self.autoSave, canTrigger = True)
 			Example Input: Listener(self, myFunction = self.checkCapsLock, shown = True)
 			Example Input: Listener(self, myFunction = self.save, myFunctionArgs = "position", delay = 1500, oneShot = False)
 			Example Input: Listener(self, myFunction = self.checkAutoLogout, resultFunction = self.logout, pauseOnDialog = True)
 			Example Input: Listener(self, myFunction = self.listenScanner, pauseOnDialog = True, not_pauseOnDialog = "modifyBarcode")
 			Example Input: Listener(self, myFunction = self.listenStatusText, delay = 0.01, errorFunction = self.listenStatusText_handleError)
 			"""
+
+			self.no_pauseFlag = threading.Event()
+			self.no_triggerFlag = threading.Event()
 
 			self.label = label
 			self.shown = shown
@@ -325,7 +331,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			self.functionKwargs = kwargs
 
 			self.delay = delay
-			self.trigger = trigger
+			self.canTrigger = canTrigger
 			self.oneShot = oneShot
 			self.delayAfter = delayAfter
 
@@ -357,10 +363,10 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 				if (not self.listening):
 					return False
 
-				if (self.bool_includeStop and self.stop):
+				if (self.bool_includeStop and self.stopFlag):
 					return False
 
-				if (self.bool_includePause and self.pause):
+				if (self.bool_includePause and self.no_pauseFlag.is_set()):
 					return False
 
 				return True
@@ -393,7 +399,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 		@MyUtilities.common.makeProperty(default = 100)
 		class delay():
 			"""How long to wait (in milliseconds) before running 'myFunction'.
-				~ If 'trigger' is not None: How long to wait before listening for 'trigger'
+				~ If 'canTrigger' is not None: How long to wait before listening for 'canTrigger'
 			"""
 
 			def setter(self, value):
@@ -428,18 +434,12 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 
 			def setter(self, value):
 				with self.parent.listener_lock:
+					self.pause(state = False)
+					self.trigger(state = False)
 					self._stopFlag = bool(value)
 
-		@MyUtilities.common.makeProperty(default = False)
-		class pauseFlag():
-			"""Determines if the listening routine should be paused."""
-
-			def setter(self, value):
-				with self.parent.listener_lock:
-					self._pauseFlag = bool(value)
-
 		@MyUtilities.common.makeProperty(default = None)
-		class trigger():
+		class canTrigger():
 			"""Determines if trigger_listen() will cause 'myFunction' to run.
 				- If True or False: Will wait for a signal from trigger_listen() before running 'myFunction'
 				- If None: Will run 'myFunction' after 'delay' is over
@@ -447,7 +447,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 
 			def setter(self, value):
 				with self.parent.listener_lock:
-					self._trigger = value
+					self._canTrigger = value
 
 		@MyUtilities.common.makeProperty(default = None)
 		class resultFunction():
@@ -530,29 +530,35 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 
 			time.sleep(self.delay / 1000)
 
+		def _waitEvent(self, event, timeout = None):
+			"""Waits for the flag to be set to True."""
+
+			if (event.is_set()):
+				return
+
+			if (not timeout):
+				event.wait()
+				return
+
+			while True:
+				event.wait(timeout = timeout)
+				if (event.is_set()):
+					break
+
 		def _checkPause(self):
 			"""Accounts for pausing the listening routine for 'myFunction'."""
 
-			while (self.pauseFlag):
-				if (self.stopFlag):
-					self.pause(state = False)
-					return
+			self._waitEvent(self.no_pauseFlag)
 
-				self._wait()
-
-		def _checkTrigger(self):
+		def _checkTrigger(self, timeout = None):
 			"""Accounts for a trigger assciated with 'myFunction'."""
-
-			if (self.trigger is None):
+			
+			if (self.canTrigger is None):
 				return
 
-			while (not self.trigger):
-				if (self.stopFlag):
-					return True
+			self._waitEvent(self.no_triggerFlag)
 
-				self._wait()
-
-			self.trigger = False
+			self.canTrigger = False
 
 		def _runFunction(self):
 			"""Runs the correct functions."""
@@ -575,7 +581,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 
 			self.listening += 1
 			try:
-				self.parent.log_info("Listener Routine Start", label = self.label, delay = self.delay, trigger = self.trigger, total = threading.active_count())
+				self.parent.log_info("Listener Routine Start", label = self.label, delay = self.delay, canTrigger = self.canTrigger, total = threading.active_count())
 				while True:
 					if (self.stopFlag):
 						break
@@ -631,7 +637,25 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			"""
 
 			# self.parent.log_debug(f"Listener {('Not ', '')[state]}Pausing", label = self.label, total = threading.active_count())
-			self.pauseFlag = state
+
+			if (state):
+				self.no_pauseFlag.clear()
+			else:
+				self.no_pauseFlag.set()
+
+		def trigger(self, state = True):
+			"""Tells the listener to trigger the listening routine.
+
+			Example Input: trigger()
+			Example Input: trigger(state = False)
+			"""
+
+			# self.parent.log_debug(f"Listener {('Not ', '')[state]}Triggering", label = self.label, total = threading.active_count())
+
+			if (state):
+				self.no_triggerFlag.clear()
+			else:
+				self.no_triggerFlag.set()
 
 		def start(self, threadName = NULL):
 			"""Starts the listen routine.

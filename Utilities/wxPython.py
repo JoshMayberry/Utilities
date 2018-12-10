@@ -1,6 +1,7 @@
 import wx
 import wx.html
 import wx.lib.wordwrap
+import wx.lib.newevent
 
 import re
 import math
@@ -13,16 +14,9 @@ import contextlib
 
 import PIL
 
-if (__name__ == "__main__"):
-	import common
-	import threadManager
-	import LICENSE_forSections as Legal
-else:
-	from . import common
-	from . import threadManager
-	from . import LICENSE_forSections as Legal
+import Utilities as MyUtilities
 
-NULL = common.NULL	
+NULL = MyUtilities.common.NULL	
 
 class NoActiveWindowError(Exception):
 	pass
@@ -53,9 +47,9 @@ def wrap_skipEvent(includeSelf = True):
 class AutocompleteTextCtrl(wx.TextCtrl):
 	"""Modified code from: https://bitbucket.org/raz/wxautocompletectrl/src/default/autocomplete.py"""
 
-	__license__ = Legal.AutocompleteTextCtrl.__license__
-	__author__ = Legal.AutocompleteTextCtrl.__author__
-	__url__ = Legal.AutocompleteTextCtrl.__url__
+	__license__ = MyUtilities.legal.AutocompleteTextCtrl.__license__
+	__author__ = MyUtilities.legal.AutocompleteTextCtrl.__author__
+	__url__ = MyUtilities.legal.AutocompleteTextCtrl.__url__
 
 	def __init__(self, parent, height = 300, completer = None, frequency = 250, style = None, 
 		caseSensitive = False, useWildcards = False, alwaysShow = False, multiline = False, 
@@ -368,9 +362,9 @@ class AutocompleteTextCtrl(wx.TextCtrl):
 		event.Skip()
 
 	class SuggestionsPopup(wx.Frame):
-		__license__ = Legal.SuggestionsPopup.__license__
-		__author__ = Legal.SuggestionsPopup.__author__
-		__url__ = Legal.SuggestionsPopup.__url__
+		__license__ = MyUtilities.legal.SuggestionsPopup.__license__
+		__author__ = MyUtilities.legal.SuggestionsPopup.__author__
+		__url__ = MyUtilities.legal.SuggestionsPopup.__url__
 
 		def __init__(self, parent, frame):
 			# wx.Frame.__init__(self, frame, style = wx.FRAME_NO_TASKBAR|wx.FRAME_FLOAT_ON_PARENT|wx.STAY_ON_TOP)
@@ -988,7 +982,7 @@ def yieldColor(colorList, *, returnForNone = wx.NullColour):
 
 	##############################
 
-	for color in common.ensure_container(colorList, elementCriteria = ((3, int), (4, int)), convertNone = False):
+	for color in MyUtilities.common.ensure_container(colorList, elementCriteria = ((3, int), (4, int)), convertNone = False):
 		if (color is None):
 			for item in yieldColor(returnForNone):
 				yield item
@@ -1086,19 +1080,19 @@ def getFont(size = NULL, font = None, *, bold = NULL, italic = NULL, family = NU
 		return wx.Size(*_size)
 
 	def _getUnderline(_underline):
-		return common.ensure_default(_underline, default = False, defaultFlag = NULL)
+		return MyUtilities.common.ensure_default(_underline, default = False, defaultFlag = NULL)
 
 	def _getStrikethrough(_strikethrough):
-		return common.ensure_default(_strikethrough, default = False, defaultFlag = NULL)
+		return MyUtilities.common.ensure_default(_strikethrough, default = False, defaultFlag = NULL)
 
 	def _getBold(_bold):
-		return fontCatalogue["bold"].get(common.ensure_default(_bold, default = False, defaultFlag = NULL), wx.NORMAL)
+		return fontCatalogue["bold"].get(MyUtilities.common.ensure_default(_bold, default = False, defaultFlag = NULL), wx.NORMAL)
 
 	def _getFamily(_family):
-		return fontCatalogue["family"].get(common.ensure_default(_family, default = None, defaultFlag = NULL), wx.DEFAULT)
+		return fontCatalogue["family"].get(MyUtilities.common.ensure_default(_family, default = None, defaultFlag = NULL), wx.DEFAULT)
 
 	def _getItalic(_italic):
-		return fontCatalogue["italic"].get(common.ensure_default(_italic, default = False, defaultFlag = NULL), wx.NORMAL)
+		return fontCatalogue["italic"].get(MyUtilities.common.ensure_default(_italic, default = False, defaultFlag = NULL), wx.NORMAL)
 
 	def _getFont():
 		nonlocal font
@@ -1144,9 +1138,9 @@ def getWildcard(wildcard = None):
 			yield "All files (*.*)|*.*"
 			return
 
-		for catalogue in common.ensure_container(wildcard):
-			for key, valueList in common.ensure_dict(catalogue, useAsKey = None).items():
-				fileTypes = "; ".join(f"*.{value}" if (value is not None) else "*.*" for value in common.ensure_container(valueList))
+		for catalogue in MyUtilities.common.ensure_container(wildcard):
+			for key, valueList in MyUtilities.common.ensure_dict(catalogue, useAsKey = None).items():
+				fileTypes = "; ".join(f"*.{value}" if (value is not None) else "*.*" for value in MyUtilities.common.ensure_container(valueList))
 				if (key is not None):
 					yield f"{key} ({fileTypes})|{fileTypes}"
 					continue
@@ -1170,7 +1164,7 @@ def autoRun(delay = None, *args, **kwargs):
 	Example Input: autoRun(5000, myFrame.switchWindow, [0, 1])
 	"""
 
-	for function, functionArgs, functionKwargs in common.ensure_functionInput(*args, **kwargs):
+	for function, functionArgs, functionKwargs in MyUtilities.common.ensure_functionInput(*args, **kwargs):
 		if (not delay):
 			wx.CallAfter(function, *functionArgs, **functionKwargs)
 		else:
@@ -1182,6 +1176,167 @@ def threadSafe(function, *args, **kwargs):
 	if (wx.IsMainThread()):
 		return function(*args, **kwargs)
 	wx.CallAfter(function, *args, **kwargs)
+
+#Event Functions
+myEventCatalogue = {}
+def _makeBinder(cls, *, useId = True, returnEvent = False, returnBinder = False, **kwargs):
+	"""Creates an event binder for this event."""
+	global myEventCatalogue
+
+	if (useId):
+		event, binder = wx.lib.newevent.NewCommandEvent(**kwargs)
+	else:
+		event, binder = wx.lib.newevent.NewEvent(**kwargs)
+
+	myEventCatalogue[cls] = binder
+
+	if (returnEvent):
+		if (returnBinder):
+			return event, binder
+		return event
+	elif (returnBinder):
+		return binder
+
+class MyEvent(wx.PyCommandEvent, metaclass = MyUtilities.common.makeTracker(_makeBinder, skipFirst = True, extraClass = wx.PyCommandEvent)):
+	"""Used to create my own events.
+	Modified code from: ObjectListView.DOLVEvent.py
+
+	Use: https://wiki.wxpython.org/CustomEventClasses
+	Use: https://wxpython.org/Phoenix/docs/html/wx.lib.newevent.html
+
+	Example Use:
+		#Make event handler
+		class EVT_FINISHED(MyEvent):
+			def __init__(self, parent, **kwargs):
+				super().__init__(self, parent, canVeto = True)
+
+				self.page = kwargs.pop("page", None)
+				self.wizard = kwargs.pop("wizard", None)
+
+		#Bind event
+		self._betterBind(self.EVT_FINISHED, self.thing, myFunction, mode = 2)
+
+		#Trigger event manually
+		self.triggerEvent(self.EVT_FINISHED, page = self.currentPage, wizard = self)
+
+		#Trigger event from other event
+		myWidget.setFunction_click(self.onTriggerEvent, myFunctionArgs = (self.EVT_FINISHED,))
+		myWidget.setFunction_click(self.onTriggerEvent, myFunctionKwargs = {"eventType": self.EVT_FINISHED, "okFunction": self.hideWindow, "okFunctionKwargs": {"modalId": wx.ID_OK}})
+	"""
+
+	def __init__(self, source, parent, canVeto = False):
+		global myEventCatalogue
+		
+		wx.PyCommandEvent.__init__(self, myEventCatalogue[source.__class__].typeId, -1)
+
+		self.veto = False
+		self.parent = parent
+		self.canVeto = canVeto
+		self.SetEventObject(parent.thing)
+
+	def Veto(self, state = True):
+		self.veto = state and self.canVeto
+
+	def IsVetoed(self):
+		return self.veto
+			
+def _betterBind(self, eventType, thing, myFunction, myFunctionArgs = None, myFunctionKwargs = None, *, mode = 1, rebind = False, printError = True, **kwargs):
+	"""Binds wxObjects in a better way.
+	Inspired by: "Florian Bosch" on http://stackoverflow.com/questions/173687/is-it-possible-to-pass-arguments-into-event-bindings
+	Special thanks for help on mult-functions to "Mike Driscoll" on http://stackoverflow.com/questions/11621833/how-to-bind-2-functions-to-a-single-event
+
+	eventType (CommandEvent) - The wxPython event to be bound
+	thing (wxObject)         - What is being bound to
+	myFunctionList (str)     - The function that will be ran when the event occurs
+	myFunctionArgs (list)    - Any input arguments for myFunction. A list of multiple functions can be given
+	myFunctionKwargs (dict)  - Any input keyword arguments for myFunction. A dictionary of variables for each function can be given as a list. The index of the variables must be the same as the index for the functions 
+	mode (int)               - Dictates how things are bound. Used for special cases
+	rebind (bool)            - Will unbind the provided function (if it was already bound) from the 'thing' and then rebind it. Only works for non-argument functions
+		- If True: Will rebind
+		- If False: Will not rebind
+		- If None: Will remove all previously bound functions
+	_________________________________________________________________________
+
+	MULTIPLE FUNCTION ORDER
+	The functions are ran in the order given; from left to right.
+
+	MULTIPLE FUNCTION FAILURE
+	Make it a habbit to end all bound functions with 'event.Skip()'. 
+	If the bound function does not end with 'event.Skip()', then it will overwrite a previously bound function.
+	This will result in the new function being ran in place of both functions.
+	_________________________________________________________________________
+
+	Example Input: _betterBind(self, wx.EVT_BUTTON, menuItem, "self.onExit", "Extra Information")
+	Example Input: _betterBind(self, wx.EVT_BUTTON, menuItem, ["self.toggleObjectWithLabel", "self.onQueueValue", ], [["myCheckBox", True], None])
+	"""
+	global MyEvent, myEventCatalogue
+
+	def bind(myFunctionEvaluated, myFunctionArgs, myFunctionKwargs):
+		"""This sub-function is needed to make the multiple functions work properly."""
+		nonlocal self, eventType, thing, mode, rebind
+
+		#Get the class type in order to bind the object to the correct thing
+		thingClass = thing.GetClassName()
+
+		##Determine how to bind the object
+		if (thingClass == "wxWindow"):
+			if (mode == 2):
+				bindObject = thing
+			else:
+				bindObject = self.parent.thing
+
+		elif (thingClass in ["wxMenuItem", "wxToolBarToolBase"]):
+			bindObject = self.thing
+		else:
+			bindObject = thing
+
+		#Account for rebinding
+		if (rebind is None):
+			bindObject.Unbind(eventType, source = thing)
+		elif (rebind):
+			if (mode == 1):
+				unbound = bindObject.Unbind(eventType, handler = myFunctionEvaluated, source = thing)
+			else:
+				unbound = bindObject.Unbind(eventType, handler = myFunctionEvaluated)
+			if ((not unbound) and printError):
+				#If the lambda style function was used, this will not work
+				warnings.warn(f"Unbinding function {myFunctionEvaluated} for {self.__repr__()} failed", Warning, stacklevel = 3)
+
+		if ((not rebind) and (eventType in self.boundEvents)):
+			self.boundEvents.remove(eventType)
+
+		#Typical binding mode
+		if (mode == 1):
+			if ((len(myFunctionKwargs) == 0) and (len(myFunctionArgs) == 0)):
+				bindObject.Bind(eventType, myFunctionEvaluated, thing)
+			else:
+				bindObject.Bind(eventType, lambda event: myFunctionEvaluated(event, *myFunctionArgs, **myFunctionKwargs), thing)
+
+		#Binding mode for window key bindings
+		elif (mode == 2):
+			if ((len(myFunctionKwargs) == 0) and (len(myFunctionArgs) == 0)):
+				bindObject.Bind(eventType, myFunctionEvaluated)
+			else:
+				bindObject.Bind(eventType, lambda event: myFunctionEvaluated(event, *myFunctionArgs, **myFunctionKwargs))
+
+		else:
+			errorMessage = f"Unknown mode {mode} for _betterBind()"
+			raise TypeError(errorMessage)
+
+		if (eventType not in self.boundEvents):
+			self.boundEvents.append(eventType)
+
+	##############################################################################################################################
+	
+	#Skip empty functions
+	if (myFunction is None):
+		return
+
+	if (isinstance(eventType, type) and issubclass(eventType, MyEvent)):
+		eventType = myEventCatalogue[eventType]
+
+	for item in MyUtilities.common.ensure_functionInput(myFunction = myFunction, myFunctionArgs = myFunctionArgs, myFunctionKwargs = myFunctionKwargs, self = self, **kwargs):
+		bind(*item)
 
 class CommonFunctions():
 	@classmethod
@@ -1214,105 +1369,10 @@ class CommonFunctions():
 		
 	@classmethod
 	def onBackgroundRun(cls, *args, self = None, **kwargs):
-		return onBackgroundRun(*args, self = common.ensure_default(self, cls), **kwargs)
-
-	def _betterBind(self, eventType, thing, myFunction, myFunctionArgs = None, myFunctionKwargs = None, *, mode = 1, rebind = False, printError = True, **kwargs):
-		"""Binds wxObjects in a better way.
-		Inspired by: "Florian Bosch" on http://stackoverflow.com/questions/173687/is-it-possible-to-pass-arguments-into-event-bindings
-		Special thanks for help on mult-functions to "Mike Driscoll" on http://stackoverflow.com/questions/11621833/how-to-bind-2-functions-to-a-single-event
-
-		eventType (CommandEvent) - The wxPython event to be bound
-		thing (wxObject)         - What is being bound to
-		myFunctionList (str)     - The function that will be ran when the event occurs
-		myFunctionArgs (list)    - Any input arguments for myFunction. A list of multiple functions can be given
-		myFunctionKwargs (dict)  - Any input keyword arguments for myFunction. A dictionary of variables for each function can be given as a list. The index of the variables must be the same as the index for the functions 
-		mode (int)               - Dictates how things are bound. Used for special cases
-		rebind (bool)            - Will unbind the provided function (if it was already bound) from the 'thing' and then rebind it. Only works for non-argument functions
-			- If True: Will rebind
-			- If False: Will not rebind
-			- If None: Will remove all previously bound functions
-		_________________________________________________________________________
-
-		MULTIPLE FUNCTION ORDER
-		The functions are ran in the order given; from left to right.
-
-		MULTIPLE FUNCTION FAILURE
-		Make it a habbit to end all bound functions with 'event.Skip()'. 
-		If the bound function does not end with 'event.Skip()', then it will overwrite a previously bound function.
-		This will result in the new function being ran in place of both functions.
-		_________________________________________________________________________
-
-		Example Input: _betterBind(wx.EVT_BUTTON, menuItem, "self.onExit", "Extra Information")
-		Example Input: _betterBind(wx.EVT_BUTTON, menuItem, ["self.toggleObjectWithLabel", "self.onQueueValue", ], [["myCheckBox", True], None])
-		"""
-		global MyEvent, myEventCatalogue
-
-		def bind(myFunctionEvaluated, myFunctionArgs, myFunctionKwargs):
-			"""This sub-function is needed to make the multiple functions work properly."""
-			nonlocal self, eventType, thing, mode, rebind
-
-			#Get the class type in order to bind the object to the correct thing
-			thingClass = thing.GetClassName()
-
-			##Determine how to bind the object
-			if (thingClass == "wxWindow"):
-				if (mode == 2):
-					bindObject = thing
-				else:
-					bindObject = self.parent.thing
-
-			elif (thingClass in ["wxMenuItem", "wxToolBarToolBase"]):
-				bindObject = self.thing
-			else:
-				bindObject = thing
-
-			#Account for rebinding
-			if (rebind is None):
-				bindObject.Unbind(eventType, source = thing)
-			elif (rebind):
-				if (mode == 1):
-					unbound = bindObject.Unbind(eventType, handler = myFunctionEvaluated, source = thing)
-				else:
-					unbound = bindObject.Unbind(eventType, handler = myFunctionEvaluated)
-				if ((not unbound) and printError):
-					#If the lambda style function was used, this will not work
-					warnings.warn(f"Unbinding function {myFunctionEvaluated} for {self.__repr__()} failed", Warning, stacklevel = 3)
-
-			if ((not rebind) and (eventType in self.boundEvents)):
-				self.boundEvents.remove(eventType)
-
-			#Typical binding mode
-			if (mode == 1):
-				if ((len(myFunctionKwargs) == 0) and (len(myFunctionArgs) == 0)):
-					bindObject.Bind(eventType, myFunctionEvaluated, thing)
-				else:
-					bindObject.Bind(eventType, lambda event: myFunctionEvaluated(event, *myFunctionArgs, **myFunctionKwargs), thing)
-
-			#Binding mode for window key bindings
-			elif (mode == 2):
-				if ((len(myFunctionKwargs) == 0) and (len(myFunctionArgs) == 0)):
-					bindObject.Bind(eventType, myFunctionEvaluated)
-				else:
-					bindObject.Bind(eventType, lambda event: myFunctionEvaluated(event, *myFunctionArgs, **myFunctionKwargs))
-
-			else:
-				errorMessage = f"Unknown mode {mode} for _betterBind()"
-				raise TypeError(errorMessage)
-
-			if (eventType not in self.boundEvents):
-				self.boundEvents.append(eventType)
-
-		##############################################################################################################################
-		
-		#Skip empty functions
-		if (myFunction is not None):
-			return
-
-		if (isinstance(eventType, type) and issubclass(eventType, MyEvent)):
-			eventType = myEventCatalogue[eventType]
-
-		for item in common.ensure_functionInput(myFunction = myFunction, myFunctionArgs = myFunctionArgs, myFunctionKwargs = myFunctionKwargs, self = self, **kwargs):
-			bind(*item)
+		return onBackgroundRun(*args, self = MyUtilities.common.ensure_default(self, cls), **kwargs)
+	
+	def _betterBind(self, *args, **kwargs):
+		return _betterBind(self, *args, **kwargs)
 
 def getPen(color, width = 1):
 	"""Returns a pen or list of pens to the user.
@@ -1924,7 +1984,7 @@ class DrawFunctions():
 	def _useOverlay(cls, *args, **kwargs):
 		return _useOverlay(*args, **kwargs)
 
-imageTypeCatalogue = common._dict({
+imageTypeCatalogue = MyUtilities.common._dict({
 	"any": 		wx.BITMAP_TYPE_ANY, 		None: "${any}", 
 	"bmp": 		wx.BITMAP_TYPE_BMP, 
 	"gif": 		wx.BITMAP_TYPE_GIF, 

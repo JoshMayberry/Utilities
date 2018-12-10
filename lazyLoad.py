@@ -66,6 +66,7 @@ _loadCatalogue = {
 	),
 
 	"Utilities": (
+		"Utilities.legal", 
 		"Utilities.logger", 
 		"Utilities.common", 
 		"Utilities.caching", 
