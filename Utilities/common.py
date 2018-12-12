@@ -10,6 +10,7 @@ import queue
 import shutil
 import typing
 
+import itertools
 import contextlib
 import collections
 
@@ -25,7 +26,7 @@ class Singleton():
 	def __init__(self, label = "Singleton", *, state = None, private = False):
 		"""
 		label (str) - What this singleton is called
-		private (bool) - Determines if only this module may use this singleton (NotImplemented)
+		private (bool) - Determines if only this module may use this singleton (Not Implemented)
 
 		state (bool) - Determiens what happens if this singleton is evaluated by bool()
 			- If True: Will always return True
@@ -638,21 +639,89 @@ def ensure_list(item, convertNone = False):
 	if (convertNone):
 		return []
 
-def ensure_container(item, *, useForNone = None, convertNone = True, returnForNone = None, 
-	evaluateGenerator = True, elementTypes = None, elementCriteria = None):
-	"""Makes sure the given item is a container.
+def ensure_lastElement(container, default = None):
+	"""Returns the last element in 'container' if there is one; otherwise returns 'default'.
+	Assumes that 'container' is indexable.
 
-	returnForNone (any) - What should be returned if 'item' is None
-		- If function: will return whatever the function returns
+	Example Input: ensure_lastElement(myList)
+	Example Input: ensure_lastElement(myList, default = int)
+	"""
+
+	if (not container):
+		return default
+
+	return container[-1]
+
+def is_container(item, *, elementTypes = None, elementCriteria = None):
+	"""Returns if the given item is a container or not.
+	Generators are not considered containers.
 
 	elementTypes (list) - Extra types that are ok to be elements
 	elementCriteria (tuple) - Allows for formatted tuples to pass as elements if they match the criteria
 		~ (required length (int), required type (type))
 		- If None: Will count all tuples as containers
 
+	Example Input: is_container(valueList)
+	Example Input: is_container(valueList, evaluateGenerator = False)
+
+	Example Input: is_container(handle, elementTypes = (Base,))
+	Example Input: is_container((255, 255, 0), elementCriteria = (3, int))
+	Example Input: is_container((255, 255, 0), elementCriteria = ((3, int), (4, int)))
+	Example Input: is_container(("lorem", 1), elementCriteria = (2, (str, int)))
+	"""
+
+	def checkItem(_item, _type):
+		if (_type is None):
+			return True
+
+		return isinstance(_item, _type)
+
+	def checkType(requiredLength, requiredType):
+		nonlocal item
+
+		if (len(item) != requiredLength):
+			return False
+
+		if (requiredType is None):
+			return True
+
+		container = ensure_container(requiredType)
+		return all(checkItem(*_item) for _item in itertools.zip_longest(item, container, fillvalue = ensure_lastElement(container)))
+
+	###########################
+
+	if (isinstance(item, (str, ELEMENT, typing.Mapping, typing.MutableMapping))):
+		return False
+
+	if (not isinstance(item, typing.Iterable)):
+		return False
+
+	if (isinstance(item, tuple(ensure_container(elementTypes, convertNone = True)))):
+		return False
+
+	if ((elementCriteria is not None) and isinstance(item, (tuple, list))):
+		if (not item):
+			return True
+
+		if (not isinstance(elementCriteria[0], tuple)): ## TO DO ## This line is clunky; find another way
+			elementCriteria = (elementCriteria,)
+
+		return not any(checkType(*required) for required in elementCriteria)
+
+	if (isinstance(item, (list, tuple, set))):
+		return True
+
+def ensure_container(item, *, useForNone = None, convertNone = True, 
+	returnForNone = None, evaluateGenerator = True, consumeFunction = True, **kwargs):
+	"""Makes sure the given item is a container.
+
+	returnForNone (any) - What should be returned if 'item' is None
+		- If function: will return whatever the function returns
+
 	Example Input: ensure_container(valueList)
 	Example Input: ensure_container(valueList, convertNone = False)
 	Example Input: ensure_container(valueList, evaluateGenerator = False)
+	Example Input: ensure_container((x for x in range(3)))
 
 	Example Input: ensure_container(handle, elementTypes = (Base,))
 	Example Input: ensure_container((255, 255, 0), elementCriteria = (3, int))
@@ -662,29 +731,19 @@ def ensure_container(item, *, useForNone = None, convertNone = True, returnForNo
 	if (item is useForNone):
 		if (convertNone):
 			return ()
-		if (callable(returnForNone)):
+		if (consumeFunction and callable(returnForNone)):
 			return returnForNone()
 		return (returnForNone,)
 
-	if ((isinstance(item, (str, ELEMENT, typing.Mapping, typing.MutableMapping)) or (not isinstance(item, typing.Iterable))) or (isinstance(item, tuple(ensure_container(elementTypes, convertNone = True))))):
+	state = is_container(item, **kwargs)
+	if (state):
+		return item
+	if (state is not None):
 		return (item,)
 
-	if ((elementCriteria is not None) and isinstance(item, (tuple, list))):
-		if (not item):
-			return ()
-
-		if (not isinstance(elementCriteria[0], tuple)):
-			elementCriteria = (elementCriteria,)
-		for requiredLength, requiredType in elementCriteria:
-			if ((len(item) == requiredLength) and (all((isinstance(subItem, requiredType)) for subItem in item))):
-				return (item,)
-		return item
-
-	if (not isinstance(item, (list, tuple, set))):
-		if (evaluateGenerator and not callable(item)):
-			return ensure_container(tuple(item), convertNone = convertNone, returnForNone = returnForNone, evaluateGenerator = evaluateGenerator, elementTypes = elementTypes, elementCriteria = elementCriteria)
-		return item
-	return item
+	if (evaluateGenerator and isinstance(item, typing.Iterable)):
+		return ensure_container(tuple(item), useForNone = useForNone, convertNone = convertNone, returnForNone = returnForNone, evaluateGenerator = evaluateGenerator, **kwargs)
+	return (item,)
 
 def ensure_dict(catalogue, default = None, *, useForNone = None, useAsKey = True, convertContainer = True, convertNone = True):
 	"""Makes sure the given catalogue is a dictionary.
@@ -711,35 +770,66 @@ def ensure_dict(catalogue, default = None, *, useForNone = None, useAsKey = True
 		return {catalogue: default}
 	return {default: catalogue}
 
-def ensure_default(value, default = None, *, consumeFunction = True, defaultFlag = None, condition = None):
-	"""Returns 'default' if 'value' is 'defaultFlag'.
-	otherwise returns 'value'.
+def ensure_default(value, default = None, *args, defaultFlag = None, condition = None, 
+	consumeFunction = True, consumeList = True, forceTuple = False):
+	"""Returns 'default' if 'value' is 'defaultFlag'; otherwise returns 'value'.
+
+	value (any) - What to check against 'defaultFlag'
+	default (any) - What to use instead of 'value' if 'value' is 'defaultFlag'
+	args (*) - If given, are combined with 'default' to make a 'default' a list
+
+	consumeList (bool) - Determines what happens if 'default' is a list
+		- If True: Returns the first non-'defaultFlag' element from 'default'
+		- If False: Returns the entire list from 'default'
 
 	condition (callable) - An extra condition that must be met
 		- If None: Does nothing
 
 	Example Input: ensureDefault(autoPrint, False)
-	Example Input: ensureDefault(autoPrint, lambda: self.checkPermission("autoPrint"))
 	Example Input: ensureDefault(autoPrint, defaultFlag = NULL)
+
+	Example Input: ensureDefault(autoPrint, lambda: self.checkPermission("autoPrint"))
 	Example Input: ensureDefault(myFunction, self.checkPermission, consumeFunction = False)
+
+	Example Input: ensureDefault(autoPrint, self.autoPrint, False)
+	Example Input: ensureDefault(autoPrint, [self.autoPrint, False])
+	Example Input: ensureDefault(myList, [1, 2, 3], consumeList = False)
 	"""
 
-	def useDefault():
-		nonlocal value, defaultFlag
+	def checkFlag(_value):
+		nonlocal defaultFlag, condition
 
-		if (value is defaultFlag):
+		if (_value is defaultFlag):
 			return True
 
-		if ((condition is not None) and condition(value)):
+		if ((condition is not None) and condition(_value)):
 			return True
+
+	def yieldDefault():
+		nonlocal default
+
+		for item in (*ensure_container(default, convertNone = False), *args):
+			if (consumeFunction and callable(item)):
+				yield item()
+			else:
+				yield item
 
 	######################################
 
-	if (useDefault()):
-		if (consumeFunction and callable(default)):
-			return default()
-		return default
-	return value
+	if (not checkFlag(value)):
+		return value
+
+	if (consumeList):
+		for item in yieldDefault():
+			if (not checkFlag(item)):
+				return item
+		return item
+
+	answer = tuple(yieldDefault())
+	if (forceTuple or (len(answer) is not 1)):
+		return answer
+	else:
+		return next(iter(answer), None)
 
 def ensure_string(value, *, returnForNone = "", extend = None):
 	"""Returns 'value' as a string.
@@ -902,6 +992,10 @@ class EnsureFunctions():
 	@classmethod
 	def ensure_functionInput(cls, *args, selfObject = None, **kwargs):
 		return ensure_functionInput(*args, selfObject = ensureDefault(selfObject, default = cls), **kwargs)
+
+	@classmethod
+	def is_container(cls, *args, **kwargs):
+		return is_container(*args, **kwargs)
 
 #Etc
 def nestedUpdate(target, catalogue, *, preserveNone = True):
@@ -2015,10 +2109,23 @@ class Container():
 		return base.format(ending)
 
 if (__name__ == "__main__"):
-	def test(x):
-		print("@test.1", x)
-		jhkhjkjkh
-		return 2
 
-	print("@__main__", runMyFunction(test, 1))
+	print(ensure_container(None))
+	print(ensure_container(1))
+	print(ensure_container((1,)))
+	print(ensure_container((x for x in range(3))))
+
+	def test():
+		yield 1
+		yield 2
+
+	print(ensure_container(test()))
+
+
+	# def test(x):
+	# 	print("@test.1", x)
+	# 	jhkhjkjkh
+	# 	return 2
+
+	# print("@__main__", runMyFunction(test, 1))
 

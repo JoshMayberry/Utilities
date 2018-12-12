@@ -1,5 +1,9 @@
 import lazy_import
 
+#Required Modules
+##py -m pip install
+	# lazy_import
+
 #Some lazy imports are turned off for now, because of: https://github.com/mnmelo/lazy_import/issues/10
 
 _loadCatalogue = {
