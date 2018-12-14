@@ -212,8 +212,8 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 
 		if (not makeThread):
 			raise NotImplementedError()
-					
-		thread = self.MyThread(self, name = name, *args, daemon = daemon, myFunction = myFunction, **kwargs)
+		
+		thread = self.MyThread(self, name, *args, daemon = daemon, myFunction = myFunction, **kwargs)
 		return thread
 
 	def listen(self, myFunction = None, *args, autoStart = True, allowMultiple = False, **kwargs):
@@ -241,7 +241,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 
 				elif (not allowMultiple):
 					return self.getListener(myFunction)
-			return self.Listener(self, myFunction = myFunction, *args, **kwargs)
+			return self.Listener(self, myFunction, *args, **kwargs)
 
 		##################################################
 
@@ -259,7 +259,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 		Example Input: oneShot(self.save)
 		"""
 
-		return self.listen(myFunction = myFunction, *args, oneShot = oneShot, **kwargs)
+		return self.listen(myFunction, *args, oneShot = oneShot, **kwargs)
 
 	def pause(self, state = True):
 		"""Pauses all listeners.
@@ -268,7 +268,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 		Example Input: pause(state = False)
 		"""
 
-		for container in (listener_catalogue.values(), listener_unnamed):
+		for container in (self.listener_catalogue.values(), self.listener_unnamed):
 			for listener in container:
 				listener.pause(state = state)
 
@@ -349,6 +349,10 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			self.preStartFunction = preStartFunction
 			self.preStartFunctionArgs = preStartFunctionArgs
 			self.preStartFunctionKwargs = preStartFunctionKwargs
+
+			self.postStartFunction = postStartFunction
+			self.postStartFunctionArgs = postStartFunctionArgs
+			self.postStartFunctionKwargs = postStartFunctionKwargs
 
 			self.postFunction = postFunction
 			self.postFunctionArgs = postFunctionArgs
@@ -707,6 +711,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 
 			self.parent.backgroundRun(self._listenRoutine, name = getThreadName(), shown = self.shown, makeThread = self.makeThread, stopFunction = stopFunction,
 				preStartFunction = self.preStartFunction, preStartFunctionArgs = self.preStartFunctionArgs, preStartFunctionKwargs = self.preStartFunctionKwargs, 
+				postStartFunction = self.postStartFunction, postStartFunctionArgs = self.postStartFunctionArgs, postStartFunctionKwargs = self.postStartFunctionKwargs, 
 				postFunction = self.postFunction, postFunctionArgs = self.postFunctionArgs, postFunctionKwargs = self.postFunctionKwargs)
 
 	class MyThread(threading.Thread):
@@ -892,7 +897,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			if (self.stopEvent.is_set()):
 				return 
 
-			MyUtilities.common.runMyFunction(myFunction = self.myFunction, *self.functionArgs, selfObject = self.parent, **self.functionKwargs)
+			MyUtilities.common.runMyFunction(self.myFunction, *self.functionArgs, **{"selfObject": self.parent, **self.functionKwargs})
 
 		def run(self):
 			"""Runs the thread and then closes it.
@@ -947,8 +952,8 @@ class CommonFunctions():
 		event.Skip()
 
 	def pause(self, *args, selfObject = None, **kwargs):
-		return self.threadManager.pause(*args, **kwargs, 
-			selfObject = MyUtilities.common.ensure_default(selfObject, default = self))
+		return self.threadManager.pause(*args, **kwargs)#, 
+			# selfObject = MyUtilities.common.ensure_default(selfObject, default = self))
 
 	def listen(self, *args, selfObject = None, **kwargs):
 		return self.threadManager.listen(*args, **kwargs, 

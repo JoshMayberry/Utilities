@@ -206,7 +206,26 @@ def getMetaclass(cls, includeNested = True, forceTuple = False):
 			return ()
 		return
 
-	answer = tuple(yieldAnswer())
+	return oneOrMany(yieldAnswer, forceTuple = forceTuple)
+
+def oneOrMany(answer, *, forceTuple = False, consumeFunction = True, forceContainer = True):
+	"""Returns the the first element of the list if it is one item long.
+	Otherwise, returns the list.
+
+	Example Input: oneOrMany(answer)
+	Example Input: oneOrMany(yieldAnswer)
+	Example Input: oneOrMany(yieldAnswer())
+	Example Input: oneOrMany(answer, forceTuple = True)
+	Example Input: oneOrMany(myList, forceContainer = False)
+	Example Input: oneOrMany(myClass, consumeFunction = False)
+	"""
+
+	if (consumeFunction and (inspect.ismethod(answer) or inspect.isfunction(answer))):
+		answer = answer()
+
+	if (forceContainer):
+		answer = ensure_container(answer)
+
 	if (forceTuple or (len(answer) is not 1)):
 		return answer
 	else:
@@ -711,7 +730,7 @@ def is_container(item, *, elementTypes = None, elementCriteria = None):
 	if (isinstance(item, (list, tuple, set))):
 		return True
 
-def ensure_container(item, *, useForNone = None, convertNone = True, 
+def ensure_container(item, *, useForNone = None, convertNone = True, is_container_answer = NULL_private, 
 	returnForNone = None, evaluateGenerator = True, consumeFunction = True, **kwargs):
 	"""Makes sure the given item is a container.
 
@@ -731,11 +750,15 @@ def ensure_container(item, *, useForNone = None, convertNone = True,
 	if (item is useForNone):
 		if (convertNone):
 			return ()
-		if (consumeFunction and callable(returnForNone)):
+		if (consumeFunction and (inspect.ismethod(returnForNone) or inspect.isfunction(returnForNone))):
 			return returnForNone()
 		return (returnForNone,)
 
-	state = is_container(item, **kwargs)
+	if (is_container_answer is NULL_private):
+		state = is_container(item, **kwargs)
+	else:
+		state = is_container_answer
+
 	if (state):
 		return item
 	if (state is not None):
@@ -785,15 +808,15 @@ def ensure_default(value, default = None, *args, defaultFlag = None, condition =
 	condition (callable) - An extra condition that must be met
 		- If None: Does nothing
 
-	Example Input: ensureDefault(autoPrint, False)
-	Example Input: ensureDefault(autoPrint, defaultFlag = NULL)
+	Example Input: ensure_default(autoPrint, False)
+	Example Input: ensure_default(autoPrint, defaultFlag = NULL)
 
-	Example Input: ensureDefault(autoPrint, lambda: self.checkPermission("autoPrint"))
-	Example Input: ensureDefault(myFunction, self.checkPermission, consumeFunction = False)
+	Example Input: ensure_default(autoPrint, lambda: self.checkPermission("autoPrint"))
+	Example Input: ensure_default(myFunction, self.checkPermission, consumeFunction = False)
 
-	Example Input: ensureDefault(autoPrint, self.autoPrint, False)
-	Example Input: ensureDefault(autoPrint, [self.autoPrint, False])
-	Example Input: ensureDefault(myList, [1, 2, 3], consumeList = False)
+	Example Input: ensure_default(autoPrint, self.autoPrint, False)
+	Example Input: ensure_default(autoPrint, [self.autoPrint, False])
+	Example Input: ensure_default(myList, [1, 2, 3], consumeList = False)
 	"""
 
 	def checkFlag(_value):
@@ -809,7 +832,7 @@ def ensure_default(value, default = None, *args, defaultFlag = None, condition =
 		nonlocal default
 
 		for item in (*ensure_container(default, convertNone = False), *args):
-			if (consumeFunction and callable(item)):
+			if (consumeFunction and (inspect.ismethod(item) or inspect.isfunction(item))):
 				yield item()
 			else:
 				yield item
@@ -825,11 +848,7 @@ def ensure_default(value, default = None, *args, defaultFlag = None, condition =
 				return item
 		return item
 
-	answer = tuple(yieldDefault())
-	if (forceTuple or (len(answer) is not 1)):
-		return answer
-	else:
-		return next(iter(answer), None)
+	return oneOrMany(yieldDefault, forceTuple = forceTuple)
 
 def ensure_string(value, *, returnForNone = "", extend = None):
 	"""Returns 'value' as a string.
@@ -875,10 +894,31 @@ def ensure_functionInput(myFunction = None, *args, myFunctionArgs = None, myFunc
 	Example Input: ensure_functionInput(lorem, myFunctionArgs = 1)
 	Example Input: ensure_functionInput(lorem, myFunctionArgs = (1, 2))
 
-	Example Input: ensure_functionInput(lorem, myFunctionArgs = (1, 2), myFunctionKwargs = {"x": 3})
-	Example Input: ensure_functionInput(lorem, 1, 2, x = 3)
+	Example Input: 
+
+	Example Input: ensure_functionInput([lorem], myFunctionArgs = (1,))
+	Example Input: ensure_functionInput([lorem], myFunctionArgs = [None])
+	Example Input: ensure_functionInput([lorem], myFunctionArgs = [[None]])
 
 	Example Input: ensure_functionInput([lorem, ipsum], myFunctionArgs = (1, 2))
+	Example Input: ensure_functionInput([lorem, ipsum], myFunctionArgs = ((1, 2, 3), None), myFunctionKwargs = (None, {"dolor": 1})))
+
+	Equivalent Inputs:
+		ensure_functionInput(lorem, myFunctionArgs = (1, 2), myFunctionKwargs = {"x": 3})
+		ensure_functionInput(lorem, 1, 2, x = 3)
+
+	Equivalent Inputs:
+		ensure_functionInput(lorem, myFunctionArgs = [1, 2, 3])
+		ensure_functionInput([lorem], myFunctionArgs = [[1, 2, 3]])
+
+	Equivalent Inputs:
+		ensure_functionInput(lorem, myFunctionArgs = None)
+		ensure_functionInput([lorem], myFunctionArgs = [None])
+
+	Equivalent Inputs:
+		ensure_functionInput(lorem, myFunctionArgs = [None])
+		ensure_functionInput([lorem], myFunctionArgs = [[None]])
+
 	"""
 
 	if (self is not None):
@@ -886,7 +926,7 @@ def ensure_functionInput(myFunction = None, *args, myFunctionArgs = None, myFunc
 		selfObject = self
 
 	def yieldArgs(n):
-		def yieldCombined(argList):
+		def yieldCombined(argsList):
 			nonlocal includeSelf, selfObject, includeEvent, event, args
 
 			if (includeSelf):
@@ -898,21 +938,24 @@ def ensure_functionInput(myFunction = None, *args, myFunctionArgs = None, myFunc
 			for item in args:
 				yield item
 
-			for item in ensure_container(argList):
+			for item in ensure_container(argsList):
 				yield item
 
 		def yieldFormatted():
-			nonlocal myFunctionArgs, n
+			nonlocal myFunctionArgs, n, is_container_answer
+
+			if (not is_container_answer):
+				if (myFunctionArgs is None):
+					yield ()
+				else:
+					yield myFunctionArgs
+				return
 
 			argsList = ensure_container(myFunctionArgs)
 
 			if (not argsList):
 				for i in range(n):
 					yield ()
-				return
-
-			if (n is 1):
-				yield argsList
 				return
 
 			if (len(argsList) != n):
@@ -928,6 +971,25 @@ def ensure_functionInput(myFunction = None, *args, myFunctionArgs = None, myFunc
 			yield tuple(yieldCombined(item))
 
 	def yieldKwargs(n):
+		def applyFormat(item):
+			if (item is None):
+				return {}
+
+			if (isinstance(item, dict)):
+				return item
+
+			if (is_container(item)):
+				n = len(item)
+				if (n is 1):
+					return applyFormat(item[0])
+
+				if (n is 0):
+					return {}
+
+				raise NotImplementedError(type(item), n)
+
+			raise NotImplementedError(type(item))
+
 		def yieldFormatted():
 			nonlocal myFunctionKwargs, n
 
@@ -937,7 +999,7 @@ def ensure_functionInput(myFunction = None, *args, myFunctionArgs = None, myFunc
 				return
 
 			if (n is 1):
-				yield myFunctionKwargs
+				yield applyFormat(myFunctionKwargs)
 				return
 
 			kwargsList = ensure_container(myFunctionKwargs)
@@ -946,7 +1008,7 @@ def ensure_functionInput(myFunction = None, *args, myFunctionArgs = None, myFunc
 				raise SyntaxError(errorMessage)
 
 			for item in kwargsList:
-				yield item
+				yield applyFormat(item)
 
 		#########################################
 
@@ -955,12 +1017,12 @@ def ensure_functionInput(myFunction = None, *args, myFunctionArgs = None, myFunc
 
 	####################################
 
-	functionList = ensure_container(myFunction)
+	is_container_answer = is_container(myFunction)
+	functionList = ensure_container(myFunction, is_container_answer = is_container_answer)
 	if (not functionList):
 		return
 
 	n = len(functionList)
-
 	for item in zip(functionList, yieldArgs(n), yieldKwargs(n)):
 		yield item
 
@@ -991,11 +1053,15 @@ class EnsureFunctions():
 
 	@classmethod
 	def ensure_functionInput(cls, *args, selfObject = None, **kwargs):
-		return ensure_functionInput(*args, selfObject = ensureDefault(selfObject, default = cls), **kwargs)
+		return ensure_functionInput(*args, selfObject = ensure_default(selfObject, default = cls), **kwargs)
 
 	@classmethod
 	def is_container(cls, *args, **kwargs):
 		return is_container(*args, **kwargs)
+
+	@classmethod
+	def oneOrMany(cls, *args, **kwargs):
+		return oneOrMany(*args, **kwargs)
 
 #Etc
 def nestedUpdate(target, catalogue, *, preserveNone = True):
@@ -1283,7 +1349,7 @@ def removeDir(filePath):
 
 	shutil.rmtree(filePath, ignore_errors = False, onerror = onerror)
 
-def runMyFunction(myFunction = None, *args, includeError = False, forceTuple = False, 
+def runMyFunction(myFunction = None, *args, includeError = True, forceTuple = False, 
 	errorFunction = None, errorFunctionArgs = None, errorFunctionKwargs = None, **kwargs):
 	"""Runs a function.
 
@@ -1304,11 +1370,11 @@ def runMyFunction(myFunction = None, *args, includeError = False, forceTuple = F
 			raise error
 
 		if (includeError):
-			extendedArgs = (error, *args)
+			_args = (error,)
 		else:
-			extendedArgs = args
+			_args = ()
 
-		for answer in runMyFunction(myFunction = errorFunction, *extendedArgs, myFunctionArgs = errorFunctionArgs, myFunctionKwargs = errorFunctionKwargs, forceTuple = True, **kwargs):
+		for answer in runMyFunction(errorFunction, *_args, myFunctionArgs = errorFunctionArgs, myFunctionKwargs = errorFunctionKwargs, forceTuple = True):
 			yield answer
 
 	def getAnswer(function, functionArgs, functionKwargs):
@@ -1318,11 +1384,7 @@ def runMyFunction(myFunction = None, *args, includeError = False, forceTuple = F
 			return function(*functionArgs, **functionKwargs)
 
 		except Exception as error:
-			answer = tuple(handleError(error))
-			if (forceTuple or (len(answer) is not 1)):
-				return answer
-			else:
-				return next(iter(answer), None)
+			return oneOrMany(handleError(error), forceTuple = forceTuple)
 
 	#########################################################
 
@@ -1330,11 +1392,7 @@ def runMyFunction(myFunction = None, *args, includeError = False, forceTuple = F
 	if (myFunction is None):
 		return
 
-	answer = tuple(getAnswer(*item) for item in ensure_functionInput(myFunction, *args, **kwargs))
-	if (forceTuple or (len(answer) is not 1)):
-		return answer
-	else:
-		return next(iter(answer), None)
+	return oneOrMany((getAnswer(*item) for item in ensure_functionInput(myFunction, *args, **kwargs)), forceTuple = forceTuple)
 		
 class CommonFunctions():
 	@classmethod
@@ -1369,9 +1427,8 @@ class CommonFunctions():
 	def removeDir(cls, *args, **kwargs):
 		return removeDir(*args, **kwargs)
 
-	@classmethod
-	def runMyFunction(cls, *args, selfObject = None, **kwargs):
-		return runMyFunction(*args, selfObject = ensureDefault(selfObject, default = cls), **kwargs)
+	def runMyFunction(self, *args, selfObject = None, **kwargs):
+		return runMyFunction(*args, selfObject = ensure_default(selfObject, default = self), **kwargs)
 	
 #Decorators
 def setDocstring(docstring):
@@ -1712,11 +1769,7 @@ def getCaller(*, exclude = None, forceTuple = False,
 
 	########################################
 
-	answer = tuple(yieldInfo())
-	if (forceTuple or (len(answer) is not 1)):
-		return answer
-	else:
-		return next(iter(answer), None)
+	return oneOrMany(yieldInfo, forceTuple = forceTuple)
 
 @contextlib.contextmanager
 def openPlus(location = None, flag = "w", *, newline = "\n", closeIO = True):
@@ -2110,22 +2163,13 @@ class Container():
 
 if (__name__ == "__main__"):
 
-	print(ensure_container(None))
-	print(ensure_container(1))
-	print(ensure_container((1,)))
-	print(ensure_container((x for x in range(3))))
+	def test(x):
+		print("@test", x)
+		jhkhjkjkh
+		return 2
 
-	def test():
-		yield 1
-		yield 2
+	def test2(error):
+		print("@test2", error)
 
-	print(ensure_container(test()))
-
-
-	# def test(x):
-	# 	print("@test.1", x)
-	# 	jhkhjkjkh
-	# 	return 2
-
-	# print("@__main__", runMyFunction(test, 1))
+	print("@__main__", runMyFunction(test, 1, errorFunction = test2))
 
