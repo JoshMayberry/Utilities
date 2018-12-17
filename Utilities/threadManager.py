@@ -916,6 +916,9 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 				if (self.postFunction is not None):
 					MyUtilities.common.runMyFunction(myFunction = self.postFunction, myFunctionArgs = self.postFunctionArgs, myFunctionKwargs = self.postFunctionKwargs, **dict(_yieldKwargs(self.functionKwargs, selfObject = self.parent)))
 
+			except Exception as error:
+				raise error
+
 			finally:
 				self.parent._remove(self, catalogue = self.parent.thread_catalogue, unnamed = self.parent.thread_unnamed, functions = self.parent.thread_functions, lock = self.parent.thread_lock)
 			

@@ -175,7 +175,9 @@ class Child():
 		sys.stderr.flush()
 		sys.exit()
 
-if (__name__ == "__main__"):
+def test_repeater():
+	"One program runs another. The two communicate information."
+
 	import argparse
 
 	parser = argparse.ArgumentParser()
@@ -190,20 +192,48 @@ if (__name__ == "__main__"):
 				break
 			handle.write(message)
 
-	else:
-		handle = Parent()
+		return
 
-		print("One line at a time:")
-		child = handle.spawn("py", "H:/Python/Material_Tracker/test_subProcess_2.py", c = None)
-		for i in range(5):
-			handle.write(i)
-			print(handle.read())
-		print(handle.close())
+	handle = Parent()
 
-		print("\nAll output at once:")
-		child = handle.spawn("py", "H:/Python/Material_Tracker/test_subProcess_2.py", c = None)
-		
-		for i in range(5):
-			handle.write(i)
-		handle.flushInput()
-		print(handle.close())
+	print("One line at a time:")
+	child = handle.spawn("py", __file__, c = None)
+	for i in range(5):
+		handle.write(i)
+		print(handle.read())
+	print(handle.close())
+
+	print("\nAll output at once:")
+	child = handle.spawn("py", __file__, c = None)
+	
+	for i in range(5):
+		handle.write(i)
+	handle.flushInput()
+	print(handle.close())
+
+def test_runOther():
+	"""Runs another program and closes itself while the other still runs."""
+
+	import argparse
+
+	parser = argparse.ArgumentParser()
+	parser.add_argument("-c", "--child", action = "store_true", help = "Marks this program as a child, and not the parent")
+	args = parser.parse_args()
+
+	if (args.child):
+		import wx
+
+		myApp = wx.App()
+		dial = wx.MessageDialog(None, f"This program is temporarily down for maintainance.\nWe will do our best to get it running again.\nThank you for your patience.", "Error", wx.OK|wx.ICON_ERROR)
+		dial.ShowModal()
+
+		sys.exit()
+
+	handle = Parent()
+	child = handle.spawn("py", __file__, c = None)
+	time.sleep(5)
+	sys.exit()
+
+if (__name__ == "__main__"):
+	# test_repeater()
+	test_runOther()
