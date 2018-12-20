@@ -208,7 +208,8 @@ def getMetaclass(cls, includeNested = True, forceTuple = False):
 
 	return oneOrMany(yieldAnswer, forceTuple = forceTuple)
 
-def oneOrMany(answer, *, forceTuple = False, consumeFunction = True, forceContainer = True):
+def oneOrMany(answer, *, forceTuple = False, forceContainer = True, 
+	consumeFunction = True, isDict = False, returnForNone = None):
 	"""Returns the the first element of the list if it is one item long.
 	Otherwise, returns the list.
 
@@ -218,16 +219,19 @@ def oneOrMany(answer, *, forceTuple = False, consumeFunction = True, forceContai
 	Example Input: oneOrMany(answer, forceTuple = True)
 	Example Input: oneOrMany(myList, forceContainer = False)
 	Example Input: oneOrMany(myClass, consumeFunction = False)
+	Example Input: oneOrMany(catalogue, isDict = True, forceContainer = False)
 	"""
 
 	if (consumeFunction and (inspect.ismethod(answer) or inspect.isfunction(answer))):
 		answer = answer()
 
-	if (forceContainer):
+	if (forceContainer and (not isDict)):
 		answer = ensure_container(answer)
 
 	if (forceTuple or (len(answer) is not 1)):
 		return answer
+	elif (isDict):
+		return next(iter(answer.values()), None)
 	else:
 		return next(iter(answer), None)
 
@@ -730,9 +734,11 @@ def is_container(item, *, elementTypes = None, elementCriteria = None):
 	if (isinstance(item, (list, tuple, set))):
 		return True
 
-def ensure_container(item, *, useForNone = None, convertNone = True, is_container_answer = NULL_private, 
+def ensure_container(item, *args, useForNone = None, convertNone = True, is_container_answer = NULL_private, 
 	returnForNone = None, evaluateGenerator = True, consumeFunction = True, **kwargs):
 	"""Makes sure the given item is a container.
+
+	args (*) - What should be appended to the end of the container 'item'
 
 	returnForNone (any) - What should be returned if 'item' is None
 		- If function: will return whatever the function returns
@@ -746,6 +752,10 @@ def ensure_container(item, *, useForNone = None, convertNone = True, is_containe
 	Example Input: ensure_container((255, 255, 0), elementCriteria = (3, int))
 	Example Input: ensure_container((255, 255, 0), elementCriteria = ((3, int), (4, int)))
 	"""
+
+	if (args):
+		return (*ensure_container(item, useForNone = useForNone, convertNone = convertNone, is_container_answer = is_container_answer, 
+					returnForNone = returnForNone, evaluateGenerator = evaluateGenerator, consumeFunction = consumeFunction, **kwargs), *args)
 
 	if (item is useForNone):
 		if (convertNone):

@@ -59,6 +59,10 @@ class TestController(unittest.TestCase):
 		#Don't consume functions
 		self.assertEqual(ensure_container(test), (test,))
 
+		#Args Support
+		self.assertEqual(ensure_container(1, 2, 3), (1, 2, 3))
+		self.assertEqual(ensure_container([1, 2], 3), (1, 2, 3))
+
 		#Element Criteria
 		##Single
 		self.assertEqual(ensure_container((255, 255, 0)), (255, 255, 0))
