@@ -283,7 +283,7 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			postStartFunction = None, postStartFunctionArgs = None, postStartFunctionKwargs = None, 
 			postFunction = None, postFunctionArgs = None, postFunctionKwargs = None, 
 			
-			shown = False, makeThread = True, threadName = NULL, **kwargs):
+			shown = False, makeThread = True, threadName = NULL, canReplace = False, **kwargs):
 			"""An object that loops a threaded function
 
 			label (str) - What this listener should be catalogued as
@@ -358,7 +358,8 @@ class ThreadManager(MyUtilities.logger.LoggingFunctions):
 			self.postFunctionArgs = postFunctionArgs
 			self.postFunctionKwargs = postFunctionKwargs
 
-			self.parent._add(self, catalogue = self.parent.listener_catalogue, unnamed = self.parent.listener_unnamed, functions = self.parent.listener_functions, lock = self.parent.listener_lock)
+			self.parent._add(self, catalogue = self.parent.listener_catalogue, unnamed = self.parent.listener_unnamed, 
+				functions = self.parent.listener_functions, lock = self.parent.listener_lock, canReplace = canReplace)
 
 		def __bool__(self):
 			"""Checks if the listening routine is running in a thread."""

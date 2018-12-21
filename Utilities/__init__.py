@@ -7,5 +7,7 @@ lazyLoad.load(
 	"operator", 
 
 	"wx.html", 
+	"wx.lib.newevent", 
 	"wx.lib.wordwrap", 
+	"wx.lib.mixins.listctrl", 
 ) 

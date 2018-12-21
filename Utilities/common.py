@@ -1441,6 +1441,8 @@ class CommonFunctions():
 		return runMyFunction(*args, selfObject = ensure_default(selfObject, default = self), **kwargs)
 	
 #Decorators
+## TO DO ## - https://hynek.me/articles/decorators/
+
 def setDocstring(docstring):
 	"""Sets the docstring of a function.
 	Special thanks to estani for how to change a docstring on https://stackoverflow.com/questions/4056983/how-do-i-programmatically-set-the-docstring/13603271#13603271
@@ -1633,6 +1635,131 @@ def lazyProperty(variable = None, *, default = NULL, defaultVariable = None, rea
 
 		return property(fget = getter_runOnce, fset = setter, fdel = remover, doc = function.__doc__)
 	return decorator
+
+class addAlias(object):
+	"""A decorator that makes another function that this function can be called by.
+	Modified Code from: http://code.activestate.com/recipes/577659-decorators-for-adding-aliases-to-methods-in-a-clas/
+
+	This function MUST be used within a class decorated with canAlias().
+	_________________________________________
+
+	Example Use: 
+		@addAlias("AddItem")
+		def Append(self): pass
+
+	Equivalent Use:
+		@addAlias("ipsum", "dolor")
+		def lorem(self): pass
+
+		@addAlias("ipsum")
+		@addAlias("dolor")
+		def lorem(self): pass
+	"""
+
+	def __init__(self, *names):
+		"""
+		names (*str) - What the other names for this function
+		"""
+
+		self.aliases = set(names)
+
+	def __call__(self, function):
+		"""This method will only be called once. Afterwards, only the function will be called."""
+
+		if (hasattr(self, "_aliases")):
+			function._aliases.update(self.aliases)
+		else:
+			function._aliases = self.aliases
+		
+		return function
+
+def canAlias(cls):
+	"""A class decorator that makes addAlias() work.
+	_________________________________________
+
+	Example Use:
+		@canAlias
+		class MyClass(object):
+			@alias("ipsum", "dolor")
+			def lorem(self): pass
+
+		assert MyClass.lorem == MyClass.ipsum == MyClass.dolor
+	"""
+
+	original = cls.__dict__.copy()
+	original_set = set(original.keys())
+	for name, method in original.items():
+		if (not hasattr(method, "_aliases")):
+			continue
+
+		for alias in method._aliases - original_set:
+			setattr(cls, alias, method)
+	
+	return cls
+
+# def makeHook(target, *functionList):
+# 	"""A class decorator that creates hook functions for another object.
+
+# 	functionList (*str) - What the functions to make hooks for are called
+# 		- If dict: {what the hook is called (str): what the function ito hook to is called (str)}
+# 	_________________________________________
+
+# 	The example below will do the same as this:
+# 		class Test():
+# 			def Append(self, *args, **kwargs):
+# 				return self.popup.Append(*args, **kwargs)
+# 			def GetValue(self, *args, **kwargs):
+# 				return self.popup.GetValue(*args, **kwargs)
+# 			def Refresh(self, *args, **kwargs):
+# 				return self.popup.Reset(*args, **kwargs)
+
+# 	Equivalent Use:
+# 		@makeHook("popup", "Append", "GetValue", {"Refresh": "Reset"})
+# 		class Test(): pass
+
+# 		@makeHook("popup", "Append")
+# 		@makeHook("popup", "GetValue")
+# 		@makeHook("popup", {"Refresh": "Reset"})
+# 		class Test(): pass
+# 	"""
+
+# 	def decorator(cls):
+# 		nonlocal functionList
+
+# 		def hookFactory(name):
+
+# 			def final(hook, self, *args, **kwargs):
+# 				return hook(self, *args, **kwargs)
+
+# 			def setup(self, *args, **kwargs):
+# 				_target = self
+# 				for item in target.split("."):
+# 					_target = getattr(_target, item)
+
+# 				hook = getattr(_target, name)
+
+# 				def replace(hook, _self, *_args, **_kwargs):
+
+# 					return final(hook, _self, *_args, **_kwargs)
+
+# 				############################################
+
+# 				setup.__code__ = final.__code__
+# 				print(locals().keys())
+				
+# 				return hook(*args, **kwargs)
+# 				# return final(self, *args, **kwargs)
+
+# 			return setup
+
+# 		##################################################
+
+# 		for item in functionList:
+# 			for key, value in ensure_dict(item, useAsKey = None).items():
+# 				setattr(cls, key, hookFactory(value))
+
+# 		return cls
+# 	return decorator
 
 #Etc Functions
 def getClosest(myList, number, returnLower = True, autoSort = False):
@@ -2173,13 +2300,43 @@ class Container():
 
 if (__name__ == "__main__"):
 
-	def test(x):
-		print("@test", x)
-		jhkhjkjkh
-		return 2
+	# def test(x):
+	# 	print("@test", x)
+	# 	jhkhjkjkh
+	# 	return 2
 
-	def test2(error):
-		print("@test2", error)
+	# def test2(error):
+	# 	print("@test2", error)
 
-	print("@__main__", runMyFunction(test, 1, errorFunction = test2))
+	# print("@__main__", runMyFunction(test, 1, errorFunction = test2))
+
+	@makeHook("ipsum.dolor", "Append", "SetSelection")
+	class Lorem():
+		def __init__(self):
+			self.ipsum = Ipsum()
+
+	class Ipsum():
+		def __init__(self):
+			self.dolor = Dolor()
+
+	class Dolor():
+		def Append(self, x):
+			return (x, 1)
+
+		def SetSelection(self, x):
+			return (x, 2)
+
+	print(tuple(item for item in dir(Lorem) if (not item.startswith("__"))))
+
+	lorem = Lorem()
+	print(tuple(item for item in dir(lorem) if (not item.startswith("__"))))
+
+	print(lorem.Append(1))
+	print(lorem.Append(1))
+	print(lorem.Append(1))
+	print(lorem.SetSelection(1))
+	print(lorem.SetSelection(1))
+	print(lorem.SetSelection(1))
+	print(lorem.Append(1))
+
 

@@ -25,6 +25,8 @@ class TestController(unittest.TestCase):
 
 	#Test Functions
 	def test_ensure_container(self):
+		ensure_container = MyUtilities.common.ensure_container
+		
 		def test():
 			yield 1
 			yield 2
@@ -34,8 +36,6 @@ class TestController(unittest.TestCase):
 				return iter((1, 2, 3))
 
 		################################	
-
-		ensure_container = MyUtilities.common.ensure_container
 
 		#Basic Usage
 		self.assertEqual(ensure_container(1), (1,))
@@ -81,6 +81,8 @@ class TestController(unittest.TestCase):
 		self.assertEqual(ensure_container(handle, elementTypes = (Test,)), (handle,))
 
 	def test_ensure_functionInput(self):
+		ensure_functionInput = MyUtilities.common.ensure_functionInput
+		
 		def lorem(): 
 			pass
 
@@ -88,8 +90,6 @@ class TestController(unittest.TestCase):
 			pass
 
 		################################
-
-		ensure_functionInput = MyUtilities.common.ensure_functionInput
 
 		#Basic Usage
 		self.assertIsInstance(ensure_functionInput(lorem, myFunctionArgs = 1), types.GeneratorType)
@@ -115,6 +115,8 @@ class TestController(unittest.TestCase):
 		self.assertRaises(SyntaxError, lambda: tuple(ensure_functionInput([lorem], myFunctionArgs = [1, 2, 3])))
 
 	def test_runMyFunction(self):
+		runMyFunction = MyUtilities.common.runMyFunction
+	
 		def lorem(x):
 			return 2
 
@@ -129,8 +131,6 @@ class TestController(unittest.TestCase):
 
 		#############################
 
-		runMyFunction = MyUtilities.common.runMyFunction
-
 		#Basic Usage
 		self.assertEqual(runMyFunction(lorem, 1), 2)
 
@@ -138,6 +138,62 @@ class TestController(unittest.TestCase):
 		self.assertRaises(CustomError, lambda: runMyFunction(ipsum, 1))
 		self.assertEqual(runMyFunction(ipsum, 1, errorFunction = dolor), 3)
 
+	def test_makeHook(self):
+		makeHook = MyUtilities.common.makeHook
+
+		#Basic Usage
+		@makeHook("ipsum", "Append", "SetSelection")
+		class Lorem():
+			def __init__(self):
+				self.ipsum = Ipsum()
+
+		class Ipsum():
+			def Append(self, x):
+				return (x, 1)
+
+			def SetSelection(self, x):
+				return (x, 2)
+
+		########################################
+
+		self.assertEqual(tuple(item for item in dir(Lorem) if (not item.startswith("__"))), ('Append', 'SetSelection'))
+
+		lorem = Lorem()
+
+		self.assertEqual(lorem.Append(1), (1, 1))
+		self.assertEqual(lorem.Append(1), (1, 1))
+		self.assertEqual(lorem.Append(1), (1, 1))
+		self.assertEqual(lorem.SetSelection(1), (1, 2))
+		self.assertEqual(lorem.SetSelection(1), (1, 2))
+		self.assertEqual(lorem.SetSelection(1), (1, 2))
+		self.assertEqual(lorem.Append(1), lorem.ipsum.Append(1))
+
+		#Nested Usage
+		@makeHook("ipsum.dolor", "Append", "SetSelection")
+		class Lorem():
+			def __init__(self):
+				self.ipsum = Ipsum()
+
+		class Ipsum():
+			def __init__(self):
+				self.dolor = Dolor()
+
+		class Dolor():
+			def Append(self, x):
+				return (x, 1)
+
+			def SetSelection(self, x):
+				return (x, 2)
+
+		lorem = Lorem()
+
+		self.assertEqual(lorem.Append(1), (1, 1))
+		self.assertEqual(lorem.Append(1), (1, 1))
+		self.assertEqual(lorem.Append(1), (1, 1))
+		self.assertEqual(lorem.SetSelection(1), (1, 2))
+		self.assertEqual(lorem.SetSelection(1), (1, 2))
+		self.assertEqual(lorem.SetSelection(1), (1, 2))
+		self.assertEqual(lorem.Append(1), lorem.ipsum.dolor.Append(1))
 
 if __name__ == '__main__':
 	unittest.main()

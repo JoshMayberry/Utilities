@@ -2,8 +2,10 @@ import wx
 import wx.html
 import wx.lib.wordwrap
 import wx.lib.newevent
+import wx.lib.mixins.listctrl
 
 import re
+import sys
 import math
 import types
 
@@ -44,401 +46,11 @@ def wrap_skipEvent(includeSelf = True):
 		return wrapper
 	return decorator
 
-class AutocompleteTextCtrl(wx.TextCtrl):
-	"""Modified code from: https://bitbucket.org/raz/wxautocompletectrl/src/default/autocomplete.py"""
-
-	__license__ = MyUtilities.legal.AutocompleteTextCtrl.__license__
-	__author__ = MyUtilities.legal.AutocompleteTextCtrl.__author__
-	__url__ = MyUtilities.legal.AutocompleteTextCtrl.__url__
-
-	def __init__(self, parent, height = 300, completer = None, frequency = 250, style = None, 
-		caseSensitive = False, useWildcards = False, alwaysShow = False, multiline = False, 
-		onSelect_hide = False, onSelect_update = False, onKey_update = False, 
-		formatter = None, verifier = None, showEmpty = False, **kwargs):
-
-		self.parent = parent
-		self.height = height
-		self.frequency = frequency
-
-		self.choices = ()
-		self.template = None
-		self.queued_popup = False
-		self.previousValue = None
-		self.skipEvent_update = False
-
-		self.verifier = verifier
-		self.formatter = formatter
-
-		self.showEmpty = showEmpty
-		self.alwaysShow = alwaysShow
-		self.useWildcards = useWildcards
-		self.caseSensitive = caseSensitive
-
-		self.onKey_update = onKey_update
-		self.onSelect_hide = onSelect_hide
-		self.onSelect_update = onSelect_update
-
-		if (isinstance(style, int)):
-			style = [style]
-		else:
-			style = style or []
-
-		style.append(wx.TE_PROCESS_ENTER)
-		if (multiline):
-			style.append(wx.TE_MULTILINE)
-
-		if (isinstance(self.parent, wx.Window)):
-			wx.TextCtrl.__init__(self, self.parent, style = functools.reduce(operator.ior, style or [0]), **kwargs)
-		else:
-			wx.TextCtrl.__init__(self, self.parent.thing, style = functools.reduce(operator.ior, style or [0]), **kwargs)
-		
-		self.SetCompleter(completer)
-
-	def default_completer(self, choices = None, template = None):
-		"""Modified code from: https://bitbucket.org/raz/wxautocompletectrl/src/default/test_autocomplete.py"""
-		
-		choices = choices or ()
-		template = template or "<b><u>{}</b></u>"
-
-		if (choices):
-			self.choices = choices
-
-		def completer(query):
-			if (not query):
-				return (), ()
-
-			_choices = self.choices or choices
-			if (not _choices):
-				return (), ()
-
-			_template = self.template or template
-
-			if (self.useWildcards):
-				if (self.caseSensitive):
-					def searchValue(section, full):
-						return re.search(section, full) is not None
-
-					def formatValue(section, full):
-						nonlocal _template
-						return re.sub(section, _template.format(section), full)
-				else:
-					def searchValue(section, full):
-						return re.search(section, full, flags = re.IGNORECASE) is not None
-
-					def formatValue(section, full):
-						nonlocal _template
-						return re.sub(section, _template.format(section), full, flags = re.IGNORECASE)
-			else:
-				if (self.caseSensitive):
-					def searchValue(section, full):
-						return section in full
-
-					def formatValue(section, full):
-						nonlocal _template
-						return full.replace(section, _template.format(section))
-				else:
-					def searchValue(section, full):
-						return section.casefold() in full.casefold()
-
-					def formatValue(section, full):
-						nonlocal _template
-						return re.sub(re.escape(section), _template.format(section), full, flags = re.IGNORECASE)
-
-			def yieldValues(query): #Do all this with a generator cleanly
-				nonlocal _choices, searchValue, formatValue
-
-				for item in _choices:
-					if (item is None):
-						continue
-
-					item = f"{item}"
-					if (not searchValue(query, item)):
-						continue
-
-					yield formatValue(query, item), item
-
-			###########################################
-				
-			answer = tuple(zip(*yieldValues(query)))
-			if (not answer):
-				return (), ()
-
-			formated, unformated = answer
-			return formated, unformated
-
-		return completer
-
-	def SetCompleter(self, completer = None):
-		"""
-		Initializes the autocompletion. The 'completer' has to be a function
-		with one argument (the current value of the control, ie. the query)
-		and it has to return two lists: formated (html) and unformated
-		suggestions.
-		"""
-
-		if (callable(completer)):
-			self.completer = completer
-		else:
-			self.completer = self.default_completer(completer or ())
-
-		frame = self.Parent
-		while not isinstance(frame, (wx.Frame, wx.Dialog, wx.adv.Wizard)):
-			frame = frame.Parent
-
-		self.popup = self.SuggestionsPopup(self, frame)
-
-		frame.Bind(wx.EVT_MOVE, self.OnMove)
-		self.Bind(wx.EVT_TEXT, self.OnTextUpdate)
-		self.Bind(wx.EVT_SIZE, self.OnSizeChange)
-		self.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown)
-		self.Bind(wx.EVT_RIGHT_UP, self.OnRightClick)
-		self.Bind(wx.EVT_KILL_FOCUS, self.OnKillFocus)
-		self.popup._suggestions.Bind(wx.EVT_KEY_DOWN, self.OnSuggestionKeyDown)
-		self.popup._suggestions.Bind(wx.EVT_LEFT_DOWN, self.OnSuggestionClicked)
-
-	def SetValue(self, value = NULL, default = None, triggerPopup = True):
-		def apply(_value):
-			nonlocal self, triggerPopup
-
-			if (not triggerPopup):
-				self.skipEvent_update = True
-
-			super(self.__class__, self).SetValue(_value)
-
-		################################
-
-		if (value is NULL):
-			value = self.Value
-
-		if (self.verifier):
-			if (not self.verifier(value)):
-				if (default is not None):
-					return apply(default)
-				return
-
-		if (self.formatter):
-			value = self.formatter(value)
-			if (value is None):
-				if (default is not None):
-					return apply(default)
-				return
-
-		if (self.previousValue is None):
-			self.previousValue = value
-
-		return apply(value)
-
-	def AdjustPopupPosition(self):
-		self.popup.Position = self.ClientToScreen((0, self.Size.height)).Get()
-
-	def OnMove(self, event):
-		self.AdjustPopupPosition()
-		event.Skip()
-
-	def OnTextUpdate(self, event):
-		if (self.IsFrozen()):
-			pass
-
-		elif (self.skipEvent_update):
-			self.skipEvent_update = False
-
-		elif (not self.queued_popup):
-			wx.CallLater(self.frequency, self.AutoComplete)
-			self.queued_popup = True
-
-		event.Skip()
-
-	def UpdateChoices(self, choices = None):
-		self.choices = choices or ()
-
-	def AutoComplete(self, choices = None):
-		def apply(formated, unformated = None):
-			nonlocal self
-
-			self.popup.SetSuggestions(formated, unformated)
-
-			if (not self.IsFrozen()):
-				self.AdjustPopupPosition()
-				self.popup.ShowWithoutActivating()
-				self.SetFocus()
-
-		####################################
-
-		self.queued_popup = False
-
-		if (choices):
-			self.UpdateChoices(choices)
-
-		value = self.GetValue()
-		if (value != ""):
-			formated, unformated = self.completer(value)
-			if (self.showEmpty or formated):
-				return apply(formated, unformated)
-
-		elif (self.alwaysShow):
-			return apply(self.choices)
-
-		if (not self.IsFrozen()):
-			self.popup.Hide()
-
-	def OnSizeChange(self, event):
-		self.popup.Size = (self.Size[0], self.height)
-		event.Skip()
-
-	def OnKeyDown(self, event):
-		key = event.GetKeyCode()
-
-		if (key == wx.WXK_UP):
-			self.popup.CursorUp()
-			return
-
-		elif (key == wx.WXK_DOWN):
-			self.popup.CursorDown()
-			return
-
-		elif (key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and self.popup.Shown):
-			self.skipEvent_update = True
-			self.SetValue(self.popup.GetSelectedSuggestion())
-			self.SetInsertionPointEnd()
-			self.popup.Hide()
-			return
-
-		elif (key == wx.WXK_HOME):
-			self.popup.CursorHome()
-
-		elif (key == wx.WXK_END):
-			self.popup.CursorEnd()
-
-		elif (event.ControlDown() and chr(key).lower() == "a"):
-			self.SelectAll()
-
-		elif (key == wx.WXK_ESCAPE):
-			self.popup.Hide()
-			return
-
-		event.Skip()
-
-	def OnSuggestionClicked(self, event):
-		self.skipEvent_update = True
-		self.SetValue(self.popup.GetSuggestion(self.popup._suggestions.VirtualHitTest(event.Position[1])))
-		self.SetInsertionPointEnd()
-		
-		wx.CallAfter(self.SetFocus)
-		if (self.onSelect_update):
-			wx.CallAfter(self.AutoComplete)
-		elif (self.onSelect_hide):
-			wx.CallAfter(self.popup.Hide)
-
-		event.Skip()
-
-	def OnSuggestionKeyDown(self, event):
-		key = event.GetKeyCode()
-		if (key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER)):
-			self.skipEvent_update = True
-			self.SetValue(self.popup.GetSelectedSuggestion())
-			self.SetInsertionPointEnd()
-			self.popup.Hide()
-
-		event.Skip()
-
-	def OnRightClick(self, event):
-		if (self.alwaysShow):
-			if (self.popup.IsShown()):
-				self.popup.Hide()
-			else:
-				self.AutoComplete()
-			return
-		event.Skip()
-
-	def OnKillFocus(self, event):
-		if (self.FindFocus() not in (self.popup._suggestions, self)):
-			self.popup.Hide()
-
-			if (self.verifier or self.formatter):
-				self.skipEvent_update = True
-				self.SetValue(default = self.previousValue)
-				self.previousValue = self.Value
-
-		event.Skip()
-
-	class SuggestionsPopup(wx.Frame):
-		__license__ = MyUtilities.legal.SuggestionsPopup.__license__
-		__author__ = MyUtilities.legal.SuggestionsPopup.__author__
-		__url__ = MyUtilities.legal.SuggestionsPopup.__url__
-
-		def __init__(self, parent, frame):
-			# wx.Frame.__init__(self, frame, style = wx.FRAME_NO_TASKBAR|wx.FRAME_FLOAT_ON_PARENT|wx.STAY_ON_TOP)
-			wx.Frame.__init__(self, frame, style = wx.FRAME_NO_TASKBAR|wx.FRAME_FLOAT_ON_PARENT|wx.STAY_ON_TOP|wx.RESIZE_BORDER)
-
-			self.parent = parent
-			panel = wx.Panel(self, wx.ID_ANY)
-			sizer = wx.BoxSizer(wx.VERTICAL)
-
-			self._suggestions = self._listbox(panel)#, size = (parent.GetSize()[1], 100))#, size = (500, 400))
-			self._suggestions.SetItemCount(0)
-			self._unformated_suggestions = None
-
-			sizer.Add(self._suggestions, 1, wx.ALL|wx.EXPAND, 5)
-			panel.SetSizer(sizer)
-
-			self.Bind(wx.EVT_KILL_FOCUS, self.OnKillFocus)
-
-		class _listbox(wx.html.HtmlListBox):
-			items = None
-
-			def OnGetItem(self, n):
-				return self.items[n] or ""
-
-		def SetSuggestions(self, suggestions, unformated_suggestions = None):
-			self._suggestions.items = suggestions
-			self._suggestions.SetItemCount(len(suggestions))
-			if (suggestions):
-				self._suggestions.SetSelection(0)
-		
-			self._suggestions.Refresh()
-			self.SendSizeEvent()
-
-			self._unformated_suggestions = unformated_suggestions or suggestions
-
-		def CursorUp(self):
-			selection = self._suggestions.GetSelection()
-			if selection > 0:
-				self._suggestions.SetSelection(selection - 1)
-
-			thing = self.parent
-			if (thing.onKey_update):
-				thing.skipEvent_update = True
-				thing.SetValue(self.GetSelectedSuggestion())
-
-		def CursorDown(self):
-			selection = self._suggestions.GetSelection()
-			last = self._suggestions.GetItemCount() - 1
-			if selection < last:
-				self._suggestions.SetSelection(selection + 1)
-
-			thing = self.parent
-			if (thing.onKey_update):
-				thing.skipEvent_update = True
-				thing.SetValue(self.GetSelectedSuggestion())
-
-		def CursorHome(self):
-			if self.IsShown():
-				self._suggestions.SetSelection(0)
-
-		def CursorEnd(self):
-			if self.IsShown():
-				self._suggestions.SetSelection(self._suggestions.GetItemCount() - 1)
-
-		def GetSelectedSuggestion(self):
-			return self._unformated_suggestions[self._suggestions.GetSelection()]
-
-		def GetSuggestion(self, n):
-			return self._unformated_suggestions[n]
-
-		def OnKillFocus(self, event):
-			if (self.FindFocus() not in (self._suggestions, self.parent)):
-				self.Hide()
-			event.Skip()
+@contextlib.contextmanager
+def asCM(function, *args, **kwargs):
+	"""Used to build with wxWidgets as context managers to help organize code."""
+
+	yield function(*args, **kwargs)
 
 #Converters
 def _convertImageToBitmap(imgImage):
@@ -1239,104 +851,147 @@ class MyEvent(wx.PyCommandEvent, metaclass = MyUtilities.common.makeTracker(_mak
 
 	def IsVetoed(self):
 		return self.veto
-			
-def _betterBind(self, eventType, thing, myFunction, myFunctionArgs = None, myFunctionKwargs = None, *, mode = 1, rebind = False, printError = True, **kwargs):
-	"""Binds wxObjects in a better way.
-	Inspired by: "Florian Bosch" on http://stackoverflow.com/questions/173687/is-it-possible-to-pass-arguments-into-event-bindings
-	Special thanks for help on mult-functions to "Mike Driscoll" on http://stackoverflow.com/questions/11621833/how-to-bind-2-functions-to-a-single-event
 
-	eventType (CommandEvent) - The wxPython event to be bound
-	thing (wxObject)         - What is being bound to
-	myFunctionList (str)     - The function that will be ran when the event occurs
-	myFunctionArgs (list)    - Any input arguments for myFunction. A list of multiple functions can be given
-	myFunctionKwargs (dict)  - Any input keyword arguments for myFunction. A dictionary of variables for each function can be given as a list. The index of the variables must be the same as the index for the functions 
-	mode (int)               - Dictates how things are bound. Used for special cases
-	rebind (bool)            - Will unbind the provided function (if it was already bound) from the 'thing' and then rebind it. Only works for non-argument functions
-		- If True: Will rebind
-		- If False: Will not rebind
-		- If None: Will remove all previously bound functions
-	_________________________________________________________________________
+class EventFunctions():
+	"""Contains functions pertaining to manipulating events."""
 
-	MULTIPLE FUNCTION ORDER
-	The functions are ran in the order given; from left to right.
+	def __init__(self):
+		self.boundEvents = []
 
-	MULTIPLE FUNCTION FAILURE
-	Make it a habbit to end all bound functions with 'event.Skip()'. 
-	If the bound function does not end with 'event.Skip()', then it will overwrite a previously bound function.
-	This will result in the new function being ran in place of both functions.
-	_________________________________________________________________________
+	def onTriggerEvent(self, event, *args, **kwargs):
+		"""A wxEvent version of triggerEvent().
 
-	Example Input: _betterBind(self, wx.EVT_BUTTON, menuItem, "self.onExit", "Extra Information")
-	Example Input: _betterBind(self, wx.EVT_BUTTON, menuItem, ["self.toggleObjectWithLabel", "self.onQueueValue", ], [["myCheckBox", True], None])
-	"""
-	global MyEvent, myEventCatalogue
+		Example Use: myWidget.setFunction_click(self.onTriggerEvent, myFunctionArgs = (self.EVT_FINISHED,))
+		Example Use: myWidget.setFunction_click(self.onTriggerEvent, myFunctionKwargs = {"eventType": self.EVT_FINISHED, "okFunction": self.hideWindow, "okFunctionKwargs": {"modalId": wx.ID_OK}})
+		"""
 
-	def bind(myFunctionEvaluated, myFunctionArgs, myFunctionKwargs):
-		"""This sub-function is needed to make the multiple functions work properly."""
-		nonlocal self, eventType, thing, mode, rebind
+		self.triggerEvent(*args, **kwargs)
+		event.Skip()
 
-		#Get the class type in order to bind the object to the correct thing
-		thingClass = thing.GetClassName()
+	def triggerEvent(self, eventType = None, thing = None, *, returnEvent = False,
+		okFunction = None, okFunctionArgs = None, okFunctionKwargs = None,
+		vetoFunction = None, vetoFunctionArgs = None, vetoFunctionKwargs = None, **kwargs):
+		"""Allows the user to easily trigger an event remotely.
 
-		##Determine how to bind the object
-		if (thingClass == "wxWindow"):
-			if (mode == 2):
+		Example Input: triggerEvent(self, self.EVT_PAGE_CHANGED)
+		Example Input: triggerEvent(self, self.EVT_PAGE_CHANGING, returnEvent = True, fromNode = self.currentNode, toNode = node)
+		Example Input: triggerEvent(self, self.EVT_FINISHED, okFunction = self.hideWindow, okFunctionKwargs = {"modalId": wx.ID_OK})
+		"""
+
+		assert eventType
+		newEvent = eventType(self, **kwargs)
+
+		if (thing is None):
+			thing = self.thing
+
+		thing.GetEventHandler().ProcessEvent(newEvent)
+		if (returnEvent):
+			return newEvent
+
+		if (newEvent.IsVetoed()):
+			MyUtilities.common.runMyFunction(myFunction = vetoFunction, myFunctionArgs = vetoFunctionArgs, myFunctionKwargs = vetoFunctionKwargs)
+			return False
+
+		MyUtilities.common.runMyFunction(myFunction = okFunction, myFunctionArgs = okFunctionArgs, myFunctionKwargs = okFunctionKwargs)
+		return True
+				
+	def _betterBind(self, eventType, thing, myFunction, myFunctionArgs = None, myFunctionKwargs = None, *, mode = 1, rebind = False, printError = True, **kwargs):
+		"""Binds wxObjects in a better way.
+		Inspired by: "Florian Bosch" on http://stackoverflow.com/questions/173687/is-it-possible-to-pass-arguments-into-event-bindings
+		Special thanks for help on mult-functions to "Mike Driscoll" on http://stackoverflow.com/questions/11621833/how-to-bind-2-functions-to-a-single-event
+
+		eventType (CommandEvent) - The wxPython event to be bound
+		thing (wxObject)         - What is being bound to
+		myFunctionList (str)     - The function that will be ran when the event occurs
+		myFunctionArgs (list)    - Any input arguments for myFunction. A list of multiple functions can be given
+		myFunctionKwargs (dict)  - Any input keyword arguments for myFunction. A dictionary of variables for each function can be given as a list. The index of the variables must be the same as the index for the functions 
+		mode (int)               - Dictates how things are bound. Used for special cases
+		rebind (bool)            - Will unbind the provided function (if it was already bound) from the 'thing' and then rebind it. Only works for non-argument functions
+			- If True: Will rebind
+			- If False: Will not rebind
+			- If None: Will remove all previously bound functions
+		_________________________________________________________________________
+
+		MULTIPLE FUNCTION ORDER
+		The functions are ran in the order given; from left to right.
+
+		MULTIPLE FUNCTION FAILURE
+		Make it a habbit to end all bound functions with 'event.Skip()'. 
+		If the bound function does not end with 'event.Skip()', then it will overwrite a previously bound function.
+		This will result in the new function being ran in place of both functions.
+		_________________________________________________________________________
+
+		Example Input: _betterBind(self, wx.EVT_BUTTON, menuItem, "self.onExit", "Extra Information")
+		Example Input: _betterBind(self, wx.EVT_BUTTON, menuItem, ["self.toggleObjectWithLabel", "self.onQueueValue", ], [["myCheckBox", True], None])
+		"""
+		global MyEvent, myEventCatalogue
+
+		def bind(myFunctionEvaluated, myFunctionArgs, myFunctionKwargs):
+			"""This sub-function is needed to make the multiple functions work properly."""
+			nonlocal self, eventType, thing, mode, rebind
+
+			#Get the class type in order to bind the object to the correct thing
+			thingClass = thing.GetClassName()
+
+			##Determine how to bind the object
+			if (thingClass == "wxWindow"):
+				if (mode == 2):
+					bindObject = thing
+				else:
+					bindObject = self.parent.thing
+
+			elif (thingClass in ["wxMenuItem", "wxToolBarToolBase"]):
+				bindObject = self.thing
+			else:
 				bindObject = thing
-			else:
-				bindObject = self.parent.thing
 
-		elif (thingClass in ["wxMenuItem", "wxToolBarToolBase"]):
-			bindObject = self.thing
-		else:
-			bindObject = thing
+			#Account for rebinding
+			if (rebind is None):
+				bindObject.Unbind(eventType, source = thing)
+			elif (rebind):
+				if (mode == 1):
+					unbound = bindObject.Unbind(eventType, handler = myFunctionEvaluated, source = thing)
+				else:
+					unbound = bindObject.Unbind(eventType, handler = myFunctionEvaluated)
+				if ((not unbound) and printError):
+					#If the lambda style function was used, this will not work
+					warnings.warn(f"Unbinding function {myFunctionEvaluated} for {self.__repr__()} failed", Warning, stacklevel = 3)
 
-		#Account for rebinding
-		if (rebind is None):
-			bindObject.Unbind(eventType, source = thing)
-		elif (rebind):
+			if ((not rebind) and (eventType in self.boundEvents)):
+				self.boundEvents.remove(eventType)
+
+			#Typical binding mode
 			if (mode == 1):
-				unbound = bindObject.Unbind(eventType, handler = myFunctionEvaluated, source = thing)
+				if ((len(myFunctionKwargs) == 0) and (len(myFunctionArgs) == 0)):
+					bindObject.Bind(eventType, myFunctionEvaluated, thing)
+				else:
+					bindObject.Bind(eventType, lambda event: myFunctionEvaluated(event, *myFunctionArgs, **myFunctionKwargs), thing)
+
+			#Binding mode for window key bindings
+			elif (mode == 2):
+				if ((len(myFunctionKwargs) == 0) and (len(myFunctionArgs) == 0)):
+					bindObject.Bind(eventType, myFunctionEvaluated)
+				else:
+					bindObject.Bind(eventType, lambda event: myFunctionEvaluated(event, *myFunctionArgs, **myFunctionKwargs))
+
 			else:
-				unbound = bindObject.Unbind(eventType, handler = myFunctionEvaluated)
-			if ((not unbound) and printError):
-				#If the lambda style function was used, this will not work
-				warnings.warn(f"Unbinding function {myFunctionEvaluated} for {self.__repr__()} failed", Warning, stacklevel = 3)
+				errorMessage = f"Unknown mode {mode} for _betterBind()"
+				raise TypeError(errorMessage)
 
-		if ((not rebind) and (eventType in self.boundEvents)):
-			self.boundEvents.remove(eventType)
+			if (eventType not in self.boundEvents):
+				self.boundEvents.append(eventType)
 
-		#Typical binding mode
-		if (mode == 1):
-			if ((len(myFunctionKwargs) == 0) and (len(myFunctionArgs) == 0)):
-				bindObject.Bind(eventType, myFunctionEvaluated, thing)
-			else:
-				bindObject.Bind(eventType, lambda event: myFunctionEvaluated(event, *myFunctionArgs, **myFunctionKwargs), thing)
+		##############################################################################################################################
+		
+		#Skip empty functions
+		if (myFunction is None):
+			return
 
-		#Binding mode for window key bindings
-		elif (mode == 2):
-			if ((len(myFunctionKwargs) == 0) and (len(myFunctionArgs) == 0)):
-				bindObject.Bind(eventType, myFunctionEvaluated)
-			else:
-				bindObject.Bind(eventType, lambda event: myFunctionEvaluated(event, *myFunctionArgs, **myFunctionKwargs))
+		if (isinstance(eventType, type) and issubclass(eventType, MyEvent)):
+			eventType = myEventCatalogue[eventType]
 
-		else:
-			errorMessage = f"Unknown mode {mode} for _betterBind()"
-			raise TypeError(errorMessage)
-
-		if (eventType not in self.boundEvents):
-			self.boundEvents.append(eventType)
-
-	##############################################################################################################################
-	
-	#Skip empty functions
-	if (myFunction is None):
-		return
-
-	if (isinstance(eventType, type) and issubclass(eventType, MyEvent)):
-		eventType = myEventCatalogue[eventType]
-
-	for item in MyUtilities.common.ensure_functionInput(myFunction = myFunction, myFunctionArgs = myFunctionArgs, myFunctionKwargs = myFunctionKwargs, self = self, **kwargs):
-		bind(*item)
+		for item in MyUtilities.common.ensure_functionInput(myFunction = myFunction, myFunctionArgs = myFunctionArgs, myFunctionKwargs = myFunctionKwargs, self = self, **kwargs):
+			bind(*item)
 
 class CommonFunctions():
 	@classmethod
@@ -1371,9 +1026,6 @@ class CommonFunctions():
 	def onBackgroundRun(cls, *args, self = None, **kwargs):
 		return onBackgroundRun(*args, self = MyUtilities.common.ensure_default(self, cls), **kwargs)
 	
-	def _betterBind(self, *args, **kwargs):
-		return _betterBind(self, *args, **kwargs)
-
 def getPen(color, width = 1):
 	"""Returns a pen or list of pens to the user.
 	Pens are used to draw shape outlines.
@@ -2024,3 +1676,620 @@ def saveBitmap(bitmap, fileName, *, imageType = None):
 
 	image = bitmap.ConvertToImage()
 	image.SaveFile(fileName, imageTypeCatalogue.get(imageType))
+
+#Custom Widgets
+class AutocompleteTextCtrl(wx.TextCtrl):
+	"""Modified code from: https://bitbucket.org/raz/wxautocompletectrl/src/default/autocomplete.py"""
+
+	__license__ = MyUtilities.legal.AutocompleteTextCtrl.__license__
+	__author__ = MyUtilities.legal.AutocompleteTextCtrl.__author__
+	__url__ = MyUtilities.legal.AutocompleteTextCtrl.__url__
+
+	def __init__(self, parent, height = 300, completer = None, frequency = 250, style = None, 
+		caseSensitive = False, useWildcards = False, alwaysShow = False, multiline = False, 
+		onSelect_hide = False, onSelect_update = False, onKey_update = False, 
+		formatter = None, verifier = None, showEmpty = False, **kwargs):
+
+		self.parent = parent
+		self.height = height
+		self.frequency = frequency
+
+		self.choices = ()
+		self.template = None
+		self.queued_popup = False
+		self.previousValue = None
+		self.skipEvent_update = False
+
+		self.verifier = verifier
+		self.formatter = formatter
+
+		self.showEmpty = showEmpty
+		self.alwaysShow = alwaysShow
+		self.useWildcards = useWildcards
+		self.caseSensitive = caseSensitive
+
+		self.onKey_update = onKey_update
+		self.onSelect_hide = onSelect_hide
+		self.onSelect_update = onSelect_update
+
+		if (isinstance(style, int)):
+			style = [style]
+		else:
+			style = style or []
+
+		style.append(wx.TE_PROCESS_ENTER)
+		if (multiline):
+			style.append(wx.TE_MULTILINE)
+
+		if (isinstance(self.parent, wx.Window)):
+			wx.TextCtrl.__init__(self, self.parent, style = functools.reduce(operator.ior, style or (0,),), **kwargs)
+		else:
+			wx.TextCtrl.__init__(self, self.parent.thing, style = functools.reduce(operator.ior, style or (0,),), **kwargs)
+		
+		self.SetCompleter(completer)
+
+	def default_completer(self, choices = None, template = None):
+		"""Modified code from: https://bitbucket.org/raz/wxautocompletectrl/src/default/test_autocomplete.py"""
+		
+		choices = choices or ()
+		template = template or "<b><u>{}</b></u>"
+
+		if (choices):
+			self.choices = choices
+
+		def completer(query):
+			if (not query):
+				return (), ()
+
+			_choices = self.choices or choices
+			if (not _choices):
+				return (), ()
+
+			_template = self.template or template
+
+			if (self.useWildcards):
+				if (self.caseSensitive):
+					def searchValue(section, full):
+						return re.search(section, full) is not None
+
+					def formatValue(section, full):
+						nonlocal _template
+						return re.sub(section, _template.format(section), full)
+				else:
+					def searchValue(section, full):
+						return re.search(section, full, flags = re.IGNORECASE) is not None
+
+					def formatValue(section, full):
+						nonlocal _template
+						return re.sub(section, _template.format(section), full, flags = re.IGNORECASE)
+			else:
+				if (self.caseSensitive):
+					def searchValue(section, full):
+						return section in full
+
+					def formatValue(section, full):
+						nonlocal _template
+						return full.replace(section, _template.format(section))
+				else:
+					def searchValue(section, full):
+						return section.casefold() in full.casefold()
+
+					def formatValue(section, full):
+						nonlocal _template
+						return re.sub(re.escape(section), _template.format(section), full, flags = re.IGNORECASE)
+
+			def yieldValues(query): #Do all this with a generator cleanly
+				nonlocal _choices, searchValue, formatValue
+
+				for item in _choices:
+					if (item is None):
+						continue
+
+					item = f"{item}"
+					if (not searchValue(query, item)):
+						continue
+
+					yield formatValue(query, item), item
+
+			###########################################
+				
+			answer = tuple(zip(*yieldValues(query)))
+			if (not answer):
+				return (), ()
+
+			formated, unformated = answer
+			return formated, unformated
+
+		return completer
+
+	def SetCompleter(self, completer = None):
+		"""
+		Initializes the autocompletion. The 'completer' has to be a function
+		with one argument (the current value of the control, ie. the query)
+		and it has to return two lists: formated (html) and unformated
+		suggestions.
+		"""
+
+		if (callable(completer)):
+			self.completer = completer
+		else:
+			self.completer = self.default_completer(completer or ())
+
+		frame = self.Parent
+		while not isinstance(frame, (wx.Frame, wx.Dialog, wx.adv.Wizard)):
+			frame = frame.Parent
+
+		self.popup = self.SuggestionsPopup(self, frame)
+
+		frame.Bind(wx.EVT_MOVE, self.OnMove)
+		self.Bind(wx.EVT_TEXT, self.OnTextUpdate)
+		self.Bind(wx.EVT_SIZE, self.OnSizeChange)
+		self.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown)
+		self.Bind(wx.EVT_RIGHT_UP, self.OnRightClick)
+		self.Bind(wx.EVT_KILL_FOCUS, self.OnKillFocus)
+		self.popup._suggestions.Bind(wx.EVT_KEY_DOWN, self.OnSuggestionKeyDown)
+		self.popup._suggestions.Bind(wx.EVT_LEFT_DOWN, self.OnSuggestionClicked)
+
+	def SetValue(self, value = NULL, default = None, triggerPopup = True):
+		def apply(_value):
+			nonlocal self, triggerPopup
+
+			if (not triggerPopup):
+				self.skipEvent_update = True
+
+			super(self.__class__, self).SetValue(_value)
+
+		################################
+
+		if (value is NULL):
+			value = self.Value
+
+		if (self.verifier):
+			if (not self.verifier(value)):
+				if (default is not None):
+					return apply(default)
+				return
+
+		if (self.formatter):
+			value = self.formatter(value)
+			if (value is None):
+				if (default is not None):
+					return apply(default)
+				return
+
+		if (self.previousValue is None):
+			self.previousValue = value
+
+		return apply(value)
+
+	def AdjustPopupPosition(self):
+		self.popup.Position = self.ClientToScreen((0, self.Size.height)).Get()
+
+	def OnMove(self, event):
+		self.AdjustPopupPosition()
+		event.Skip()
+
+	def OnTextUpdate(self, event):
+		if (self.IsFrozen()):
+			pass
+
+		elif (self.skipEvent_update):
+			self.skipEvent_update = False
+
+		elif (not self.queued_popup):
+			wx.CallLater(self.frequency, self.AutoComplete)
+			self.queued_popup = True
+
+		event.Skip()
+
+	def UpdateChoices(self, choices = None):
+		self.choices = choices or ()
+
+	def AutoComplete(self, choices = None):
+		def apply(formated, unformated = None):
+			nonlocal self
+
+			self.popup.SetSuggestions(formated, unformated)
+
+			if (not self.IsFrozen()):
+				self.AdjustPopupPosition()
+				self.popup.ShowWithoutActivating()
+				self.SetFocus()
+
+		####################################
+
+		self.queued_popup = False
+
+		if (choices):
+			self.UpdateChoices(choices)
+
+		value = self.GetValue()
+		if (value != ""):
+			formated, unformated = self.completer(value)
+			if (self.showEmpty or formated):
+				return apply(formated, unformated)
+
+		elif (self.alwaysShow):
+			return apply(self.choices)
+
+		if (not self.IsFrozen()):
+			self.popup.Hide()
+
+	def OnSizeChange(self, event):
+		self.popup.Size = (self.Size[0], self.height)
+		event.Skip()
+
+	def OnKeyDown(self, event):
+		key = event.GetKeyCode()
+
+		if (key == wx.WXK_UP):
+			self.popup.CursorUp()
+			return
+
+		elif (key == wx.WXK_DOWN):
+			self.popup.CursorDown()
+			return
+
+		elif (key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and self.popup.Shown):
+			self.skipEvent_update = True
+			self.SetValue(self.popup.GetSelectedSuggestion())
+			self.SetInsertionPointEnd()
+			self.popup.Hide()
+			return
+
+		elif (key == wx.WXK_HOME):
+			self.popup.CursorHome()
+
+		elif (key == wx.WXK_END):
+			self.popup.CursorEnd()
+
+		elif (event.ControlDown() and chr(key).lower() == "a"):
+			self.SelectAll()
+
+		elif (key == wx.WXK_ESCAPE):
+			self.popup.Hide()
+			return
+
+		event.Skip()
+
+	def OnSuggestionClicked(self, event):
+		self.skipEvent_update = True
+		self.SetValue(self.popup.GetSuggestion(self.popup._suggestions.VirtualHitTest(event.Position[1])))
+		self.SetInsertionPointEnd()
+		
+		wx.CallAfter(self.SetFocus)
+		if (self.onSelect_update):
+			wx.CallAfter(self.AutoComplete)
+		elif (self.onSelect_hide):
+			wx.CallAfter(self.popup.Hide)
+
+		event.Skip()
+
+	def OnSuggestionKeyDown(self, event):
+		key = event.GetKeyCode()
+		if (key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER)):
+			self.skipEvent_update = True
+			self.SetValue(self.popup.GetSelectedSuggestion())
+			self.SetInsertionPointEnd()
+			self.popup.Hide()
+
+		event.Skip()
+
+	def OnRightClick(self, event):
+		if (self.alwaysShow):
+			if (self.popup.IsShown()):
+				self.popup.Hide()
+			else:
+				self.AutoComplete()
+			return
+		event.Skip()
+
+	def OnKillFocus(self, event):
+		if (self.FindFocus() not in (self.popup._suggestions, self)):
+			self.popup.Hide()
+
+			if (self.verifier or self.formatter):
+				self.skipEvent_update = True
+				self.SetValue(default = self.previousValue)
+				self.previousValue = self.Value
+
+		event.Skip()
+
+	class SuggestionsPopup(wx.Frame):
+		__license__ = MyUtilities.legal.SuggestionsPopup.__license__
+		__author__ = MyUtilities.legal.SuggestionsPopup.__author__
+		__url__ = MyUtilities.legal.SuggestionsPopup.__url__
+
+		def __init__(self, parent, frame):
+			# wx.Frame.__init__(self, frame, style = wx.FRAME_NO_TASKBAR|wx.FRAME_FLOAT_ON_PARENT|wx.STAY_ON_TOP)
+			wx.Frame.__init__(self, frame, style = wx.FRAME_NO_TASKBAR|wx.FRAME_FLOAT_ON_PARENT|wx.STAY_ON_TOP|wx.RESIZE_BORDER)
+
+			self.parent = parent
+			panel = wx.Panel(self, wx.ID_ANY)
+			sizer = wx.BoxSizer(wx.VERTICAL)
+
+			self._suggestions = self._listbox(panel)#, size = (parent.GetSize()[1], 100))#, size = (500, 400))
+			self._suggestions.SetItemCount(0)
+			self._unformated_suggestions = None
+
+			sizer.Add(self._suggestions, 1, wx.ALL|wx.EXPAND, 5)
+			panel.SetSizer(sizer)
+
+			self.Bind(wx.EVT_KILL_FOCUS, self.OnKillFocus)
+
+		class _listbox(wx.html.HtmlListBox):
+			items = None
+
+			def OnGetItem(self, n):
+				return self.items[n] or ""
+
+		def SetSuggestions(self, suggestions, unformated_suggestions = None):
+			self._suggestions.items = suggestions
+			self._suggestions.SetItemCount(len(suggestions))
+			if (suggestions):
+				self._suggestions.SetSelection(0)
+		
+			self._suggestions.Refresh()
+			self.SendSizeEvent()
+
+			self._unformated_suggestions = unformated_suggestions or suggestions
+
+		def CursorUp(self):
+			selection = self._suggestions.GetSelection()
+			if selection > 0:
+				self._suggestions.SetSelection(selection - 1)
+
+			thing = self.parent
+			if (thing.onKey_update):
+				thing.skipEvent_update = True
+				thing.SetValue(self.GetSelectedSuggestion())
+
+		def CursorDown(self):
+			selection = self._suggestions.GetSelection()
+			last = self._suggestions.GetItemCount() - 1
+			if selection < last:
+				self._suggestions.SetSelection(selection + 1)
+
+			thing = self.parent
+			if (thing.onKey_update):
+				thing.skipEvent_update = True
+				thing.SetValue(self.GetSelectedSuggestion())
+
+		def CursorHome(self):
+			if self.IsShown():
+				self._suggestions.SetSelection(0)
+
+		def CursorEnd(self):
+			if self.IsShown():
+				self._suggestions.SetSelection(self._suggestions.GetItemCount() - 1)
+
+		def GetSelectedSuggestion(self):
+			return self._unformated_suggestions[self._suggestions.GetSelection()]
+
+		def GetSuggestion(self, n):
+			return self._unformated_suggestions[n]
+
+		def OnKillFocus(self, event):
+			if (self.FindFocus() not in (self._suggestions, self.parent)):
+				self.Hide()
+			event.Skip()
+
+# @MyUtilities.common.makeHook("popup.checkList", "Append", "SetSelection", "Clear")
+class CheckListCtrl(wx.ComboCtrl, MyUtilities.common.EnsureFunctions, EventFunctions):
+	"""A wxListCtrl-like widget where each item in the drop-down list has a check box.
+	Modified code from: https://github.com/wxWidgets/Phoenix/blob/master/demo/ComboCtrl.py
+	"""
+
+	def __init__(self, parent, root = None, *, myId = None, initial = None, position = None, size = None, style = None, 
+		readOnly = False, alphabetic = False, **kwargs):
+		"""
+		parent (wxWindow) – Parent window (must not be None)
+		initial (str) – Initial selection string
+		readOnly (bool) - Determiens if the user can modify values in this widget
+
+		Example Input: CheckListCtrl(self)
+		"""
+
+		EventFunctions.__init__(self)
+
+		self.thing = self
+		self.parent = parent
+
+		root = self.ensure_default(root, default = parent)
+		if (not isinstance(self.parent, wx.Window)):
+			root = root.thing
+
+		#Configure settings
+		if (isinstance(style, int)):
+			style = [style]
+		else:
+			style = style or []
+
+		if (readOnly):
+			style.append(wx.CB_READONLY)
+
+		if (alphabetic):
+			style.append(wx.CB_SORT)
+
+		#Create object
+		super().__init__(root, 
+			id = myId or wx.ID_ANY, 
+			value = initial or "", 
+			pos = position or wx.DefaultPosition, 
+			size = size or wx.DefaultSize, 
+			style = functools.reduce(operator.ior, style or (0,)))
+
+		self.popup = self.MyPopup(self, **kwargs)
+
+	def Append(self, *args, **kwargs):
+		return self.popup.checkList.Append(*args, **kwargs)
+
+	def SetSelection(self, *args, **kwargs):
+		return self.popup.checkList.SetSelection(*args, **kwargs)
+
+	def Clear(self, *args, **kwargs):
+		return self.popup.checkList.Clear(*args, **kwargs)
+
+	def setFunction_check(self, myFunction = None, myFunctionArgs = None, myFunctionKwargs = None):
+		self._betterBind(self.EVT_CHECK, self, myFunction, myFunctionArgs, myFunctionKwargs, mode = 2)
+
+	def OnCheckItem(self, index, state, item):
+		self.triggerEvent(self.EVT_CHECK, index = index, state = state, item = item, text = item.GetText(), raw = self.parent.choices[index])
+
+	class EVT_CHECK(MyEvent):
+		def __init__(self, parent, **kwargs):
+			super().__init__(self, parent)
+
+			self.raw = kwargs.pop("raw", None) #The un-formatted version of 'text'
+			self.item = kwargs.pop("item", None) #The wxListItem that was checked
+			self.text = kwargs.pop("text", None) #What the item says
+			self.index = kwargs.pop("index", None) #The index of the item
+			self.state = kwargs.pop("state", None) #If the item is checked or not
+
+	# @MyUtilities.common.makeHook("checkList", "Append", "SetSelection", "Clear")
+	class MyPopup(wx.ComboPopup, MyUtilities.common.EnsureFunctions):
+		"""The popup control used by CheckListCtrl."""
+
+		def __init__(self, parent, *, prefHeight = None, lazyLoad = False, **kwargs):
+			"""
+			multiple (bool) - Determines if the user can check multiple boxes or not
+			lazyLoad (bool) - Determines if when Create() is called
+				- If True: Waits for the first time the popup is called
+				- If False: Calls it during the build process
+			
+			prefHeight (int) - What height you would prefer the popup box use
+				- If None: Will calculate what hight to use based on it's contents
+				- If -1: Will use the default height
+			"""
+
+			self.parent = parent
+			self.lazyLoad = lazyLoad 
+			self.prefHeight = prefHeight
+
+			self._buildKwargs = kwargs
+
+			super().__init__()
+
+			parent.SetPopupControl(self)
+
+		def Create(self, parent):
+			self.checkList = self.MyListCtrl(self, parent, **self._buildKwargs)
+			del self._buildKwargs
+
+			return True
+
+		def GetControl(self):
+			return self.checkList
+
+		def GetAdjustedSize(self, minWidth, prefHeight, maxHeight):
+			if (self.prefHeight is -1):
+				return super().GetAdjustedSize(minWidth, prefHeight, maxHeight)
+			
+			elif (self.prefHeight is not None):
+				return (minWidth, min(self.prefHeight, maxHeight))
+
+			return self.checkList.GetBestSize(minWidth, prefHeight, maxHeight)
+
+		def LazyCreate(self):
+			return self.lazyLoad
+
+		class MyListCtrl(wx.ListCtrl, wx.lib.mixins.listctrl.CheckListCtrlMixin, MyUtilities.common.EnsureFunctions):
+			"""Modified code from: https://github.com/wxWidgets/wxPython/blob/master/demo/CheckListCtrlMixin.py"""
+
+			def __init__(self, parent, root, *, popupId = None, multiple = False, 
+				image_check = None, image_uncheck = None):
+				"""
+				multiple (bool) - Determines if the user can check multiple boxes or not
+				"""
+
+				self.parent = parent
+				self.widget = parent.parent
+
+				#Configure settings
+				style = [wx.LC_LIST, wx.SIMPLE_BORDER]
+
+				if (not multiple):
+					style.append(wx.LC_SINGLE_SEL)
+
+				#Create object
+				wx.ListCtrl.__init__(self, root, id = popupId or wx.ID_ANY, style = functools.reduce(operator.ior, style or (0,)))
+				wx.lib.mixins.listctrl.CheckListCtrlMixin.__init__(self, check_image = image_check, uncheck_image = image_uncheck)
+
+				#Bind functions
+				# self.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self.OnItemActivated)
+				# self.Bind(wx.EVT_MOTION, self.OnMotion)
+				# self.Bind(wx.EVT_LEFT_DOWN, self.OnLeftDown)
+
+			def Append(self, value, default = False, *, triggerEvent = False):
+				"""Appends the given item to the list.
+
+				value (str) - What the item will say
+				default (bool) - What state the check box will start out at
+
+				Example Input: Append("lorem")
+				Example Input: Append("lorem", default = True)
+				"""
+
+				# print("@Append", self.widget)
+
+				n = self.GetItemCount()
+				self.InsertItem(n, value)
+
+				if (default):
+					self.CheckItem(n, triggerEvent = triggerEvent)
+
+			def Clear(self):
+				self.ClearAll()
+
+			def SetSelection(self, selection, state = True, *, triggerEvent = False):
+				for index in selection:
+					self.CheckItem(index, check = state, triggerEvent = triggerEvent)
+
+			def GetBestSize(self, minWidth, prefHeight, maxHeight):
+				return (minWidth, min(prefHeight, maxHeight, sum(self.GetItemRect(i)[3] for i in range(self.GetItemCount())) + self.GetItemRect(0)[3]))
+
+			def CheckItem(self, index, check = True, triggerEvent = True):
+				"""Overridden to allow for the event to not be triggered."""
+
+				# print("@CheckItem", index)
+
+				imageIndex = self.GetItem(index).GetImage()
+				if (not operator.xor(imageIndex, check)):
+					return
+
+				self.SetItemImage(index, int(check))
+
+				if (triggerEvent):
+					self.OnCheckItem(index, check)
+
+			def OnCheckItem(self, index, state):
+				item = self.GetItem(index)
+				self.widget.OnCheckItem(index = index, state = state, item = item)
+
+if (__name__ == "__main__"):
+	class TestFrame(wx.Frame):
+		def __init__(self):
+			super().__init__(None, wx.ID_ANY, "Lorem Ipsum")
+
+			with asCM(wx.Panel, self, wx.ID_ANY) as myPanel:
+				with asCM(wx.BoxSizer, wx.VERTICAL) as mySizer:
+		 
+					with asCM(CheckListCtrl, myPanel, prefHeight = None) as myWidget:
+						myWidget.Append("lorem")
+						myWidget.Append("ipsum", default = True)
+						myWidget.Append("dolor")
+						
+						myWidget.setFunction_check(self.onCheck)
+						mySizer.Add(myWidget, 0, wx.ALL, 5)
+			 
+					myPanel.SetSizer(mySizer)
+
+		def onCheck(self, event):
+			print("@onCheck", event.state, event.index, event.text, event.item)
+
+	####################################
+
+	app = wx.App(False)
+	frame = TestFrame()
+	frame.Show()
+	app.MainLoop()
