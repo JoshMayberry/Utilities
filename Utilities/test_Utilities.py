@@ -138,62 +138,154 @@ class TestController(unittest.TestCase):
 		self.assertRaises(CustomError, lambda: runMyFunction(ipsum, 1))
 		self.assertEqual(runMyFunction(ipsum, 1, errorFunction = dolor), 3)
 
-	def test_makeHook(self):
-		makeHook = MyUtilities.common.makeHook
+	# def test_makeHook(self):
+	# 	makeHook = MyUtilities.common.makeHook
+
+	# 	#Basic Usage
+	# 	@makeHook("ipsum", "Append", "SetSelection")
+	# 	class Lorem():
+	# 		def __init__(self):
+	# 			self.ipsum = Ipsum()
+
+	# 	class Ipsum():
+	# 		def Append(self, x):
+	# 			return (x, 1)
+
+	# 		def SetSelection(self, x):
+	# 			return (x, 2)
+
+	# 	########################################
+
+	# 	self.assertEqual(tuple(item for item in dir(Lorem) if (not item.startswith("__"))), ('Append', 'SetSelection'))
+
+	# 	lorem = Lorem()
+
+	# 	self.assertEqual(lorem.Append(1), (1, 1))
+	# 	self.assertEqual(lorem.Append(1), (1, 1))
+	# 	self.assertEqual(lorem.Append(1), (1, 1))
+	# 	self.assertEqual(lorem.SetSelection(1), (1, 2))
+	# 	self.assertEqual(lorem.SetSelection(1), (1, 2))
+	# 	self.assertEqual(lorem.SetSelection(1), (1, 2))
+	# 	self.assertEqual(lorem.Append(1), lorem.ipsum.Append(1))
+
+	# 	#Nested Usage
+	# 	@makeHook("ipsum.dolor", "Append", "SetSelection")
+	# 	class Lorem():
+	# 		def __init__(self):
+	# 			self.ipsum = Ipsum()
+
+	# 	class Ipsum():
+	# 		def __init__(self):
+	# 			self.dolor = Dolor()
+
+	# 	class Dolor():
+	# 		def Append(self, x):
+	# 			return (x, 1)
+
+	# 		def SetSelection(self, x):
+	# 			return (x, 2)
+
+	# 	lorem = Lorem()
+
+	# 	self.assertEqual(lorem.Append(1), (1, 1))
+	# 	self.assertEqual(lorem.Append(1), (1, 1))
+	# 	self.assertEqual(lorem.Append(1), (1, 1))
+	# 	self.assertEqual(lorem.SetSelection(1), (1, 2))
+	# 	self.assertEqual(lorem.SetSelection(1), (1, 2))
+	# 	self.assertEqual(lorem.SetSelection(1), (1, 2))
+	# 	self.assertEqual(lorem.Append(1), lorem.ipsum.dolor.Append(1))
+
+	def test_CustomIterator(self):
+		CustomIterator = MyUtilities.common.CustomIterator
+
+		class Test():
+			def __init__(self):
+				self.lorem = [1, 2, 3, 4]
+
+		################################
+
+		test = Test()
+		lorem = CustomIterator(test, "lorem")
+
+		self.assertEqual(lorem.next(), 1)
+		self.assertEqual(lorem.next(), 2)
+		self.assertEqual(lorem.next(), 3)
+		self.assertEqual(lorem.previous(), 2)
+		self.assertEqual(lorem.next(), 3)
+		self.assertEqual(lorem.next(), 4)
+
+	def test_makeProperty(self):
+		makeProperty = MyUtilities.common.makeProperty
 
 		#Basic Usage
-		@makeHook("ipsum", "Append", "SetSelection")
-		class Lorem():
-			def __init__(self):
-				self.ipsum = Ipsum()
+		class Test():
+			@makeProperty()
+			class lorem():
+				def getter(self):
+					return self.ipsum
+				def setter(self, value):
+					self.ipsum = value + 2
 
-		class Ipsum():
-			def Append(self, x):
-				return (x, 1)
+		test = Test()
+		self.assertRaises(AttributeError, lambda: test.lorem)
+		test.lorem = 3
+		self.assertEqual(test.lorem, 5)
 
-			def SetSelection(self, x):
-				return (x, 2)
+		#Default Value
+		class Test():
+			@makeProperty(default = 7)
+			class lorem():
+				def getter(self):
+					return self.ipsum
+				def setter(self, value):
+					self.ipsum = value + 2
 
-		########################################
+		test = Test()
+		self.assertEqual(test.lorem, 9)
 
-		self.assertEqual(tuple(item for item in dir(Lorem) if (not item.startswith("__"))), ('Append', 'SetSelection'))
+		#Type Annotations
+		##Basic Use
+		class Test():
+			@makeProperty(forceType = True)
+			class lorem():
+				def getter(self):
+					return self.ipsum
+				def setter(self, value: int):
+					self.ipsum = value
 
-		lorem = Lorem()
+		test = Test()
+		test.lorem = 3
+		self.assertRaises(TypeError, lambda: setattr(test, "lorem", "3"))
+		self.assertEqual(test.lorem, 3)
 
-		self.assertEqual(lorem.Append(1), (1, 1))
-		self.assertEqual(lorem.Append(1), (1, 1))
-		self.assertEqual(lorem.Append(1), (1, 1))
-		self.assertEqual(lorem.SetSelection(1), (1, 2))
-		self.assertEqual(lorem.SetSelection(1), (1, 2))
-		self.assertEqual(lorem.SetSelection(1), (1, 2))
-		self.assertEqual(lorem.Append(1), lorem.ipsum.Append(1))
+		##Auto Casting
+		class Test():
+			@makeProperty(forceType = True, convertType = True)
+			class lorem():
+				def getter(self):
+					return self.ipsum
+				def setter(self, value: int):
+					self.ipsum = value
 
-		#Nested Usage
-		@makeHook("ipsum.dolor", "Append", "SetSelection")
-		class Lorem():
-			def __init__(self):
-				self.ipsum = Ipsum()
+		test = Test()
+		test.lorem = "3"
+		self.assertEqual(test.lorem, 3)
 
-		class Ipsum():
-			def __init__(self):
-				self.dolor = Dolor()
+		##Manual Casting
+		def formatter(value):
+			return int(value) + 2
+				
+		class Test():
+			@makeProperty(forceType = True, convertType = formatter)
+			class lorem():
+				def getter(self):
+					return self.ipsum
+				def setter(self, value: int):
+					self.ipsum = value
 
-		class Dolor():
-			def Append(self, x):
-				return (x, 1)
-
-			def SetSelection(self, x):
-				return (x, 2)
-
-		lorem = Lorem()
-
-		self.assertEqual(lorem.Append(1), (1, 1))
-		self.assertEqual(lorem.Append(1), (1, 1))
-		self.assertEqual(lorem.Append(1), (1, 1))
-		self.assertEqual(lorem.SetSelection(1), (1, 2))
-		self.assertEqual(lorem.SetSelection(1), (1, 2))
-		self.assertEqual(lorem.SetSelection(1), (1, 2))
-		self.assertEqual(lorem.Append(1), lorem.ipsum.dolor.Append(1))
+		test = Test()
+		test.lorem = "3"
+		self.assertEqual(test.lorem, 5)
 
 if __name__ == '__main__':
 	unittest.main()

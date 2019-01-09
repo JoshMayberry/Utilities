@@ -273,10 +273,11 @@ class CommonIterator(object):
 
 class CustomIterator():
 	"""Iterates over items in an external list."""
-	def __init__(self, parent, variableName, loop = False, printError = False):
+	def __init__(self, parent, variableName = None, loop = False, printError = False):
 		"""
 		parent (object) - The object that will be using this iterator; typically self
 		variableName (str) - The name of a variable in *parent* that will be used as the list to iterate through
+			- If None: The user plans to override _getItem()
 		loop (bool) - If the iterator should never stop, and link the two ends of the list
 		printError (bool) - If errors should be printed
 
@@ -288,16 +289,17 @@ class CustomIterator():
 		self.parent = parent
 		self.printError = printError
 
-		if (not isinstance(variableName, str)):
-			errorMessage = f"'variableName' must be a str, not a {type(variableName)}"
-			raise ValueError(errorMessage)
-		if (not hasattr(self.parent, variableName)):
-			errorMessage = f"{self.parent.__repr__()} must have a variable named {variableName}"
-			raise ValueError(errorMessage)
-		if (not isinstance(getattr(self.parent, variableName), (list, tuple))):
-			errorMessage = f"{variableName} in {self.parent.__repr__()} must be a list or tuple, not a {type(getattr(self.parent, variableName))}"
-			raise ValueError(errorMessage)
-		self._variableName = variableName
+		if (variableName is not None):
+			if (not isinstance(variableName, str)):
+				errorMessage = f"'variableName' must be a str, not a {type(variableName)}"
+				raise ValueError(errorMessage)
+			if (not hasattr(self.parent, variableName)):
+				errorMessage = f"{self.parent.__repr__()} must have a variable named {variableName}"
+				raise ValueError(errorMessage)
+			if (not isinstance(getattr(self.parent, variableName), (list, tuple))):
+				errorMessage = f"{variableName} in {self.parent.__repr__()} must be a list or tuple, not a {type(getattr(self.parent, variableName))}"
+				raise ValueError(errorMessage)
+			self._variableName = variableName
 
 	def __iter__(self):
 		return self
@@ -317,6 +319,15 @@ class CustomIterator():
 			else:
 				raise StopIteration
 
+	def stepForward(self):
+		self.index += 1
+
+	def stepBackward(self):
+		if (self.index is -1):
+			self.index = len(self) - 1
+	
+		self.index -= 1
+
 	def previous(self):
 		"""Returns the previous item in the list.
 
@@ -324,7 +335,7 @@ class CustomIterator():
 		"""
 
 		try:
-			if (self.index == -1):
+			if (self.index is -1):
 				self.index = len(self) - 1
 		
 			self.index -= 1
@@ -1468,7 +1479,8 @@ def setDocstring(docstring):
 		return function
 	return decorator
 
-def makeProperty(default = NULL_private, variableName = "_{}", *, publisher = None, subscription = None):
+def makeProperty(default = NULL_private, variableName = "_{}", *, publisher = None, subscription = None, 
+	forceType = None, convertType = False, setterVariable = "value"):
 	"""Turns the decorated class into a property.
 	Uses the docstring of the class for the docstring of the property.
 	Uses the functions getter, setter, and remover to create the property.
@@ -1484,6 +1496,18 @@ def makeProperty(default = NULL_private, variableName = "_{}", *, publisher = No
 	subscription (str) - A pubsub subscription label to subscribe the setter to
 		~ Note: You will have to pass in the self parameter as a different kwarg for this to work
 		- If None: Will use the property name as the subscription label
+
+	forceType (bool) - Determines if the type annotation for 'value' in setter() should be enforced
+		- If None: Does nothing
+		- If True: All values must be the given type
+		- If False: All values must be the given type or None
+
+	convertType (bool) - Determines what happens if 'forceType' fails
+		- If True: Will try casting 'value' as the type that it is annotated as in setter()
+		- If False: Raises an error
+		- If callable: Will pass 'value' in as an arg to 'convertType'
+
+	setterVariable (str) - What the variable is called to check the annotation for in setter()
 	_________________________________________
 	
 	Example Use:
@@ -1509,29 +1533,73 @@ def makeProperty(default = NULL_private, variableName = "_{}", *, publisher = No
 	Example Input: makeProperty(default = None)
 	Example Input: makeProperty(default = None, variableName = "ipsum")
 	Example Input: makeProperty(default = None, variableName = "{}_ipsum")
+
+	Example Input: makeProperty(forceType = True)
+	Example Input: makeProperty(forceType = False)
+	Example Input: makeProperty(forceType = True, convertType = True)
+	Example Input: makeProperty(forceType = True, convertType = formatter)
 	"""
 
 	def decorator(cls):
-		setter = getattr(cls, "setter", None)
-		if (publisher is not None):
-			publisher.subscribe(setter, subscription or cls.__name__)
+		def make_getter():
+			nonlocal cls, default
 
-		if (default is NULL_private):
-			getter = getattr(cls, "getter", None)
-		else:
-			_variable = variableName.format(cls.__name__)
 			_getter = getattr(cls, "getter", None)
+			if (default is NULL_private):
+				return _getter
 
+			_variable = variableName.format(cls.__name__)
 			if (_getter is None):
 				_getter = lambda self: getattr(self, _variable)
-			if (setter is None):
-				setter = lambda self, value: setattr(self, _variable, value)
-
+			
 			def getter(self):
 				if (not hasattr(self, _variable)):
 					setter(self, default)
 
 				return _getter(self)
+			return getter
+
+		def make_setter():
+			nonlocal cls, default, forceType
+
+			_setter = getattr(cls, "setter", None)
+			if ((forceType is None) or (_setter is None) or (setterVariable not in _setter.__annotations__)):
+				if ((default is NULL_private) or (_setter is not None)):
+					return _setter
+				return lambda self, value: setattr(self, _variable, value)
+
+			_type = _setter.__annotations__[setterVariable]
+
+			if (forceType):
+				checkType = lambda value: isinstance(value, _type)
+			else:
+				checkType = lambda value: (value is None) or isinstance(value, _type)
+
+			if (not convertType):
+				def converter(value):
+					errorMessage = f"The given value should be a {_type}, not a {type(value)}"
+					raise TypeError(errorMessage)
+			elif (callable(convertType)):
+				converter = convertType
+			else:
+				converter = _type
+
+			def setter(self, value):
+				nonlocal checkType, converter, _setter
+
+				if (not checkType(value)):
+					value = converter(value)
+				return _setter(self, value)
+			return setter
+
+		#############################################
+
+
+		setter = make_setter()
+		getter = make_getter()
+
+		if (publisher is not None):
+			publisher.subscribe(setter, subscription or cls.__name__)
 
 		return property(
 			fset = setter, 
@@ -2298,7 +2366,7 @@ class Container():
 				break
 		return base.format(ending)
 
-if (__name__ == "__main__"):
+# if (__name__ == "__main__"):
 
 	# def test(x):
 	# 	print("@test", x)
@@ -2310,33 +2378,33 @@ if (__name__ == "__main__"):
 
 	# print("@__main__", runMyFunction(test, 1, errorFunction = test2))
 
-	@makeHook("ipsum.dolor", "Append", "SetSelection")
-	class Lorem():
-		def __init__(self):
-			self.ipsum = Ipsum()
+	# @makeHook("ipsum.dolor", "Append", "SetSelection")
+	# class Lorem():
+	# 	def __init__(self):
+	# 		self.ipsum = Ipsum()
 
-	class Ipsum():
-		def __init__(self):
-			self.dolor = Dolor()
+	# class Ipsum():
+	# 	def __init__(self):
+	# 		self.dolor = Dolor()
 
-	class Dolor():
-		def Append(self, x):
-			return (x, 1)
+	# class Dolor():
+	# 	def Append(self, x):
+	# 		return (x, 1)
 
-		def SetSelection(self, x):
-			return (x, 2)
+	# 	def SetSelection(self, x):
+	# 		return (x, 2)
 
-	print(tuple(item for item in dir(Lorem) if (not item.startswith("__"))))
+	# print(tuple(item for item in dir(Lorem) if (not item.startswith("__"))))
 
-	lorem = Lorem()
-	print(tuple(item for item in dir(lorem) if (not item.startswith("__"))))
+	# lorem = Lorem()
+	# print(tuple(item for item in dir(lorem) if (not item.startswith("__"))))
 
-	print(lorem.Append(1))
-	print(lorem.Append(1))
-	print(lorem.Append(1))
-	print(lorem.SetSelection(1))
-	print(lorem.SetSelection(1))
-	print(lorem.SetSelection(1))
-	print(lorem.Append(1))
+	# print(lorem.Append(1))
+	# print(lorem.Append(1))
+	# print(lorem.Append(1))
+	# print(lorem.SetSelection(1))
+	# print(lorem.SetSelection(1))
+	# print(lorem.SetSelection(1))
+	# print(lorem.Append(1))
 
 
