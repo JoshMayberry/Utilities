@@ -16,7 +16,8 @@ import contextlib
 
 import PIL
 
-import Utilities as MyUtilities
+import MyUtilities.legal
+import MyUtilities.common
 
 NULL = MyUtilities.common.NULL	
 

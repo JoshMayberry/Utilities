@@ -9,7 +9,7 @@ import traceback
 import logging
 import logging.handlers
 
-import Utilities as MyUtilities
+import MyUtilities.common
 
 NULL = MyUtilities.common.NULL
 

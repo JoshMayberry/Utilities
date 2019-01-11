@@ -2,10 +2,7 @@ import time
 import atexit
 import multiprocessing
 
-if (__name__ == "__main__"):
-	import common
-else:
-	import Utilities.common as common
+import MyUtilities.common as common
 
 processList = set()
 

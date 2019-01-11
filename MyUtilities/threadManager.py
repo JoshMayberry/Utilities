@@ -5,7 +5,8 @@ import queue
 import threading
 import contextlib
 
-import Utilities as MyUtilities
+import MyUtilities.common
+import MyUtilities.logger
 
 NULL = MyUtilities.common.NULL
 

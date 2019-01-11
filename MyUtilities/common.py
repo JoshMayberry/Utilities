@@ -1977,25 +1977,25 @@ def getCaller(*, exclude = None, forceTuple = False,
 	return oneOrMany(yieldInfo, forceTuple = forceTuple)
 
 @contextlib.contextmanager
-def openPlus(location = None, flag = "w", *, newline = "\n", closeIO = True):
+def openPlus(location = None, mode = "w", *, newline = "\n", closeIO = True, unique = False, unique_template = " ({})"):
 	"""Automates opening files in different ways.
 
 	location (str) - Where the file to open is located on disk
 		~ If None: Will open an empty io stream
 		~ If IO stream: Will use that location in RAM
 
-	flag (str) - How to open the location
+	mode (str) - How to open the location
 
 	Example Input: openPlus("example.ini")
 	Example Input: openPlus(myStream)
-	Example Input: openPlus(myStream, flag = "wb")
+	Example Input: openPlus(myStream, mode = "wb")
 	"""
 
 	def getHandle():
-		nonlocal location, flag, newline
+		nonlocal location, mode, newline
 
 		if (location is None):
-			if ("b" in flag):
+			if ("b" in mode):
 				return io.BytesIO(location)
 			return io.StringIO(location, newline = newline)
 
@@ -2004,7 +2004,14 @@ def openPlus(location = None, flag = "w", *, newline = "\n", closeIO = True):
 			if (directory):
 				os.makedirs(directory, exist_ok = True)
 
-			return open(location, flag)
+			if (unique and os.path.exists(location)):
+				name, extension = os.path.splitext(location)
+				i = 1
+				while os.path.exists(f"{name}{unique_template.format(i)}{extension}"):
+					i += 1
+				location = f"{name}{unique_template.format(i)}{extension}"
+
+			return open(location, mode)
 
 		if (isinstance(location, io.IOBase)):
 			return location
