@@ -231,9 +231,9 @@ def oneOrMany(answer, *, forceTuple = False, forceContainer = True,
 	if (forceTuple or (len(answer) is not 1)):
 		return answer
 	elif (isDict):
-		return next(iter(answer.values()), None)
+		return next(iter(answer.values()), returnForNone)
 	else:
-		return next(iter(answer), None)
+		return next(iter(answer), returnForNone)
 
 #Iterators
 class CommonIterator(object):
@@ -888,6 +888,27 @@ def ensure_string(value, *, returnForNone = "", extend = None):
 		return f"{value}"
 
 	return f"{value}".format(extend)
+
+def ensure_filePath(filePath, *, ending = None, raiseError = True, default = None, checkExists = True):
+	if (filePath is None):
+		if (callable(default)):
+			return default()
+		return default
+
+	if (ending is not None):
+		for _ending in ensure_container(ending):
+			if (filePath.endswith(_ending)):
+				break
+		else:
+			filePath += _ending
+
+	if (checkExists and (not os.path.exists(filePath))):
+		if (raiseError):
+			raise FileNotFoundError(filePath)
+		if (callable(default)):
+			return default()
+		return default
+	return filePath
 	
 def ensure_functionInput(myFunction = None, *args, myFunctionArgs = None, myFunctionKwargs = None, 
 	includeSelf = False, selfObject = None, self = None, includeEvent = False, event = None, **kwargs):
@@ -1071,6 +1092,10 @@ class EnsureFunctions():
 	@classmethod
 	def ensure_string(cls, *args, **kwargs):
 		return ensure_string(*args, **kwargs)
+
+	@classmethod
+	def ensure_filePath(cls, *args, **kwargs):
+		return ensure_filePath(*args, **kwargs)
 
 	@classmethod
 	def ensure_functionInput(cls, *args, selfObject = None, **kwargs):
@@ -2051,10 +2076,10 @@ class EtcFunctions():
 		return openPlus(*args, **kwargs)
 
 
-def _get(itemCatalogue, itemLabel = None, returnExists = False, exclude = None):
+def _get(itemCatalogue, label = None, *, returnExists = False, exclude = None, returnForNone = NULL_private):
 	"""Searches the label catalogue for the requested object.
 
-	itemLabel (any) - What the object is labled as in the catalogue
+	label (any) - What the object is labled as in the catalogue
 		- If slice: objects will be returned from between the given spots 
 		- If None: Will return all that would be in an unbound slice
 
@@ -2064,58 +2089,58 @@ def _get(itemCatalogue, itemLabel = None, returnExists = False, exclude = None):
 	Example Input: _get(self.rowCatalogue, slice(2, 7, None))
 	"""
 
-	if (exclude is None):
-		exclude = []
-	elif (not isinstance(exclude, (list, tuple, set, range, types.GeneratorType))):
-		exclude = [exclude]
+	def yieldSlice(sliceHandle):
+		nonlocal itemCatalogue, exclude
 
-	#Account for retrieving all nested
-	if (itemLabel is None):
-		itemLabel = slice(None, None, None)
-
-	#Account for indexing
-	if (isinstance(itemLabel, slice)):
-		if (itemLabel.step is not None):
+		if (sliceHandle.step is not None):
 			raise NotImplementedError()
-		
-		elif ((itemLabel.start is not None) and (itemLabel.start not in itemCatalogue)):
-			errorMessage = f"There is no item labled {itemLabel.start} in the given catalogue"
+		elif ((sliceHandle.start is not None) and (sliceHandle.start not in itemCatalogue)):
+			errorMessage = f"There is no item labled {sliceHandle.start} in the given catalogue"
 			raise KeyError(errorMessage)
-		
-		elif ((itemLabel.stop is not None) and (itemLabel.stop not in itemCatalogue)):
-			errorMessage = f"There is no item labled {itemLabel.stop} in the given catalogue"
+		elif ((sliceHandle.stop is not None) and (sliceHandle.stop not in itemCatalogue)):
+			errorMessage = f"There is no item labled {sliceHandle.stop} in the given catalogue"
 			raise KeyError(errorMessage)
 
-		handleList = []
-		begin = False
-		for item in sorted(itemCatalogue.keys(), key = lambda item: f"{item}"):
-			#Allow for slicing with non-integers
-			if ((not begin) and ((itemLabel.start is None) or (itemCatalogue[item].label == itemLabel.start))):
-				begin = True
-			elif ((itemLabel.stop is not None) and (itemCatalogue[item].label == itemLabel.stop)):
-				break
+		generator = (item for item in sorted(itemCatalogue.keys(), key = lambda item: f"{item}"))
+		if (sliceHandle.start is not None):
+			for item in generator:
+				if (itemCatalogue[item].sliceHandle == sliceHandle.start):
+					if (item not in exclude):
+						yield item
+					break
 
-			#Slice catalogue via creation date
-			if (begin and (item not in exclude)):
-				handleList.append(itemCatalogue[item])
+		if (sliceHandle.stop is not None):
+			for item in generator:
+				if (itemCatalogue[item].sliceHandle == sliceHandle.stop):
+					break
+				if (item not in exclude):
+					yield item
+			return
 
-		return handleList
+		for item in generator:
+			if (item not in exclude):
+				yield item
 
-	elif (itemLabel not in itemCatalogue):
-		answer = None
-	else:
-		answer = itemCatalogue[itemLabel]
+	#############################################
+
+	exclude = ensure_container(exclude)
+
+	if (label is None):
+		return oneOrMany(yieldSlice(slice(None, None, None)))
+
+	if (isinstance(label, slice)):
+		return oneOrMany(yieldSlice(label))
 
 	if (returnExists):
-		return answer is not None
+		return label in itemCatalogue
 
-	if (answer is not None):
-		if (isinstance(answer, (list, tuple, range))):
-			if (len(answer) == 1):
-				answer = answer[0]
-		return answer
+	if (label in itemCatalogue):
+		return oneOrMany(itemCatalogue[label])
 
-	errorMessage = f"There is no item labled {itemLabel} in the given catalogue"
+	if (returnForNone is not NULL_private):
+		return returnForNone
+
+	errorMessage = f"There is no item labled {label} in the given catalogue"
 	raise KeyError(errorMessage)
 
 class Container():
@@ -2149,7 +2174,7 @@ class Container():
 		return output
 
 	def __len__(self):
-		return len(self[:])
+		return len(self._dataCatalogue)
 
 	def __contains__(self, key):
 		return _get(self._dataCatalogue, key, returnExists = True)
@@ -2220,6 +2245,9 @@ class Container():
 	# 	apply_or_remove("_dataCatalogue", isFunction = False)
 
 	# 	print("@2", self.__getitem__, source.__getitem__)
+
+	def _get(self, *args, **kwargs):
+		return _get(self._dataCatalogue, *args, **kwargs)
 
 	def getValue(self, variable, order = True, includeMissing = True, exclude = [], sortNone = False, reverse = False, getFunction = None):
 		"""Returns a list of all values for the requested variable.
