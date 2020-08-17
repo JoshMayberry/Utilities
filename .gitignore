@@ -1,2 +1,6 @@
 *__pycache__/
 forks/
+*.lib
+*.db
+*.obj
+*test.log

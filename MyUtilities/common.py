@@ -766,7 +766,7 @@ def ensure_container(item, *args, useForNone = None, convertNone = True, is_cont
 
 	if (args):
 		return (*ensure_container(item, useForNone = useForNone, convertNone = convertNone, is_container_answer = is_container_answer, 
-					returnForNone = returnForNone, evaluateGenerator = evaluateGenerator, consumeFunction = consumeFunction, **kwargs), *args)
+			returnForNone = returnForNone, evaluateGenerator = evaluateGenerator, consumeFunction = consumeFunction, **kwargs), *args)
 
 	if (item is useForNone):
 		if (convertNone):
@@ -2143,21 +2143,8 @@ def _get(itemCatalogue, label = None, *, returnExists = False, exclude = None, r
 	errorMessage = f"There is no item labled {label} in the given catalogue"
 	raise KeyError(errorMessage)
 
-class Container():
-	def __init__(self, dataCatalogue = None, label_variable = None):
-		assert not hasattr(self, "_dataCatalogue")
-
-		if (isinstance(dataCatalogue, str)):
-			if (not hasattr(self, dataCatalogue)):
-				setattr(self, dataCatalogue, {})
-			self._dataCatalogue = getattr(self, dataCatalogue)
-
-		elif (dataCatalogue is None):
-			self._dataCatalogue = {}
-			
-		else:
-			raise NotImplementedError(dataCatalogue)
-
+class Container_Item():
+	def __init__(self, label_variable = None):
 		self._label_variable = ensure_string(label_variable, returnForNone = "label")
 
 	def __repr__(self):
@@ -2171,6 +2158,28 @@ class Container():
 		output += extendString(self, self._label_variable)
 		output += extendString(self, "parent", useRepr = True)
 		output += extendString(self, "root", useRepr = True)
+		return output
+
+class Container(Container_Item):
+	def __init__(self, dataCatalogue = None, label_variable = None):
+		Container_Item.__init__(self, label_variable = label_variable)
+
+		assert not hasattr(self, "_dataCatalogue")
+
+		if (isinstance(dataCatalogue, str)):
+			if (not hasattr(self, dataCatalogue)):
+				setattr(self, dataCatalogue, {})
+			self._dataCatalogue = getattr(self, dataCatalogue)
+
+		elif (dataCatalogue is None):
+			self._dataCatalogue = {}
+			
+		else:
+			raise NotImplementedError(dataCatalogue)
+
+	def __str__(self):
+		output = super().__str__()
+		output += extendString(len(self), "Children Count")
 		return output
 
 	def __len__(self):
