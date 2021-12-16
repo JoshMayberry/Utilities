@@ -950,7 +950,7 @@ class CommonFunctions():
 		return self.threadManager.backgroundRun(*args, **kwargs, 
 			selfObject = MyUtilities.common.ensure_default(selfObject, default = self))
 
-	def onBackgroundRun(event, *args, **kwargs):
+	def onBackgroundRun(self, event, *args, **kwargs):
 		"""A wxEvent version of backgroundRun()."""
 
 		self.backgroundRun(*args, **kwargs)

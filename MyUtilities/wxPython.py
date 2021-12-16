@@ -1023,10 +1023,6 @@ class CommonFunctions():
 	def threadSafe(cls, *args, **kwargs):
 		return threadSafe(*args, **kwargs)
 		
-	@classmethod
-	def onBackgroundRun(cls, *args, self = None, **kwargs):
-		return onBackgroundRun(*args, self = MyUtilities.common.ensure_default(self, cls), **kwargs)
-	
 def getPen(color, width = 1):
 	"""Returns a pen or list of pens to the user.
 	Pens are used to draw shape outlines.
