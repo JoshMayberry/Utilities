@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": ".",
+			"name": "Root",
+			"folder_exclude_patterns": [".vscode", "__pycache__"],
+			"file_exclude_patterns": ["*.sublime-project"],
+			"follow_symlinks": true
+		}
+	]
+}
